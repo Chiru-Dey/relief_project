@@ -59,4 +59,4 @@ app = to_a2a(manager_agent, port=8001)
 
 if __name__ == "__main__":
     print("🚀 Starting Modular Relief Manager Server on Port 8001...")
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run("manager_server:app", host="0.0.0.0", port=8001, reload=True)

@@ -3,7 +3,7 @@ import sqlite3
 DB_FILE = "relief_logistics.db"
 
 def init_db():
-    """Initializes the database with tables and seed data."""
+    """Initializes the database with updated schema."""
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
@@ -13,17 +13,18 @@ def init_db():
                     quantity INTEGER
                 )''')
     
-    # 2. Requests Table
+    # 2. Requests Table (Added 'urgency' column)
     c.execute('''CREATE TABLE IF NOT EXISTS requests (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     item_name TEXT,
                     quantity INTEGER,
                     location TEXT,
                     status TEXT,
+                    urgency TEXT,
                     notes TEXT
                 )''')
     
-    # 3. Seed Data (only if empty)
+    # 3. Seed Data
     c.execute("SELECT count(*) FROM inventory")
     if c.fetchone()[0] == 0:
         print("🌱 Seeding database with initial inventory...")
@@ -31,7 +32,8 @@ def init_db():
             ("water_bottles", 100),
             ("food_packs", 50),
             ("medical_kits", 10),
-            ("blankets", 30)
+            ("blankets", 30),
+            ("batteries", 200)
         ]
         c.executemany("INSERT INTO inventory (item_name, quantity) VALUES (?, ?)", seed_data)
         conn.commit()
@@ -43,24 +45,35 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# --- INVENTORY OPERATIONS ---
+# --- INVENTORY CRUD ---
 
 def get_item_stock(item_name: str) -> int:
-    """Returns quantity of item, or -1 if item doesn't exist."""
     conn = get_db_connection()
     row = conn.execute("SELECT quantity FROM inventory WHERE item_name = ?", (item_name,)).fetchone()
     conn.close()
     return row['quantity'] if row else -1
 
-def get_all_item_names() -> list[str]:
-    """Returns list of all item names in inventory."""
+def get_all_items() -> list[dict]:
     conn = get_db_connection()
-    rows = conn.execute("SELECT item_name FROM inventory").fetchall()
+    rows = conn.execute("SELECT * FROM inventory").fetchall()
     conn.close()
-    return [r['item_name'] for r in rows]
+    return [dict(r) for r in rows]
+
+def add_new_item(item_name: str, quantity: int):
+    """Adds a new item type to the database."""
+    conn = get_db_connection()
+    conn.execute("INSERT INTO inventory (item_name, quantity) VALUES (?, ?)", (item_name, quantity))
+    conn.commit()
+    conn.close()
+
+def delete_item(item_name: str):
+    """Permanently removes an item type from inventory."""
+    conn = get_db_connection()
+    conn.execute("DELETE FROM inventory WHERE item_name = ?", (item_name,))
+    conn.commit()
+    conn.close()
 
 def update_stock(item_name: str, new_quantity: int):
-    """Updates the stock level of an item."""
     conn = get_db_connection()
     conn.execute("UPDATE inventory SET quantity = ? WHERE item_name = ?", (new_quantity, item_name))
     conn.commit()
@@ -68,13 +81,12 @@ def update_stock(item_name: str, new_quantity: int):
 
 # --- REQUEST OPERATIONS ---
 
-def create_request(item_name: str, quantity: int, location: str, status: str, notes: str) -> int:
-    """Creates a new request and returns the Request ID."""
+def create_request(item_name: str, quantity: int, location: str, status: str, urgency: str, notes: str) -> int:
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO requests (item_name, quantity, location, status, notes) VALUES (?, ?, ?, ?, ?)",
-        (item_name, quantity, location, status, notes)
+        "INSERT INTO requests (item_name, quantity, location, status, urgency, notes) VALUES (?, ?, ?, ?, ?, ?)",
+        (item_name, quantity, location, status, urgency, notes)
     )
     req_id = cursor.lastrowid
     conn.commit()
@@ -82,21 +94,19 @@ def create_request(item_name: str, quantity: int, location: str, status: str, no
     return req_id
 
 def get_pending_requests() -> list[dict]:
-    """Returns a list of dictionaries representing pending requests."""
     conn = get_db_connection()
-    rows = conn.execute("SELECT * FROM requests WHERE status = 'PENDING'").fetchall()
+    # prioritize CRITICAL requests first
+    rows = conn.execute("SELECT * FROM requests WHERE status = 'PENDING' ORDER BY urgency DESC, id ASC").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 def get_request_by_id(request_id: int) -> dict:
-    """Returns a single request dict or None."""
     conn = get_db_connection()
     row = conn.execute("SELECT * FROM requests WHERE id = ?", (request_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
 def update_request_status(request_id: int, status: str):
-    """Updates the status of a request."""
     conn = get_db_connection()
     conn.execute("UPDATE requests SET status = ? WHERE id = ?", (status, request_id))
     conn.commit()
