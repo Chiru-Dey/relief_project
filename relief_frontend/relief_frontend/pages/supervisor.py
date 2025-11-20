@@ -66,8 +66,19 @@ def supervisor_ui():
                                 ),
                                 rx.text(f"Loc: {req['location']}", size="2"),
                                 rx.hstack(
-                                    rx.button("✅ Approve", color_scheme="green", on_click=lambda: State.approve_request(req["id"])),
-                                    rx.button("❌ Reject", color_scheme="red", on_click=lambda: State.reject_request(req["id"])),
+                                    # LOADING STATE APPLIED TO BUTTONS
+                                    rx.button(
+                                        "✅ Approve", 
+                                        color_scheme="green", 
+                                        on_click=lambda: State.approve_request(req["id"]),
+                                        loading=State.is_supervisor_loading
+                                    ),
+                                    rx.button(
+                                        "❌ Reject", 
+                                        color_scheme="red", 
+                                        on_click=lambda: State.reject_request(req["id"]),
+                                        loading=State.is_supervisor_loading
+                                    ),
                                     spacing="2", margin_top="2"
                                 ), align="start"
                             ), margin_bottom="2"
@@ -80,7 +91,7 @@ def supervisor_ui():
 
         rx.divider(margin_y="4"),
 
-        # --- COMMAND INTERFACE (NEW) ---
+        # COMMAND CENTER
         rx.box(
             rx.heading("💬 Command Center", size="5", margin_bottom="2"),
             rx.text("Execute complex tasks via natural language.", size="2", color="gray", margin_bottom="2"),
@@ -90,21 +101,27 @@ def supervisor_ui():
                     value=State.supervisor_input,
                     on_change=State.set_supervisor_input,
                     on_key_down=lambda e: rx.cond(e == "Enter", State.submit_supervisor_query(), None),
-                    width="100%"
+                    width="100%",
+                    disabled=State.is_supervisor_loading
                 ),
-                rx.button(rx.icon("send"), on_click=State.submit_supervisor_query, color_scheme="blue"),
+                rx.button(
+                    rx.icon("send"), 
+                    on_click=State.submit_supervisor_query, 
+                    color_scheme="blue",
+                    loading=State.is_supervisor_loading
+                ),
             ),
             margin_bottom="4"
         ),
 
-        # ACTIVITY LOG
+        # LOGS
         rx.text("Agent Activity Log", weight="bold"),
         rx.scroll_area(
             rx.vstack(rx.foreach(State.logs, lambda log: rx.text(log, font_family="monospace", size="1"))),
             height="200px", bg="gray.50", padding="2", border_radius="md"
         ),
 
-        # --- MODALS (Same as before) ---
+        # MODALS
         rx.dialog.root(
             rx.dialog.content(
                 rx.dialog.title("Restock Item"),
@@ -112,6 +129,7 @@ def supervisor_ui():
                 rx.input(placeholder="New Quantity", on_change=State.set_restock_qty, type="number"),
                 rx.flex(
                     rx.dialog.close(rx.button("Cancel", color_scheme="gray")),
+                    # Update button triggers main loading state
                     rx.dialog.close(rx.button("Update", on_click=State.submit_restock)),
                     spacing="3", margin_top="4", justify="end",
                 ),
