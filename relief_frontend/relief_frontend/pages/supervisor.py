@@ -122,34 +122,23 @@ def supervisor_ui():
         ),
 
         # MODALS
+        # Restock Modal
         rx.dialog.root(
             rx.dialog.content(
                 rx.dialog.title("Restock Item"),
-                rx.text(f"Update stock for: {State.selected_item_for_restock}"),
-                rx.input(placeholder="New Quantity", on_change=State.set_restock_qty, type="number"),
+                rx.text(f"Adding stock to: {State.selected_item_for_restock}"),
+                
+                # CHANGED: Placeholder text
+                rx.input(placeholder="Amount to Add", on_change=State.set_restock_qty, type="number"),
+                
                 rx.flex(
                     rx.dialog.close(rx.button("Cancel", color_scheme="gray")),
-                    # Update button triggers main loading state
-                    rx.dialog.close(rx.button("Update", on_click=State.submit_restock)),
+                    rx.dialog.close(rx.button("Add Stock", on_click=State.submit_restock)),
                     spacing="3", margin_top="4", justify="end",
                 ),
             ),
             open=State.is_restock_modal_open,
             on_open_change=State.set_is_restock_modal_open,
-        ),
-        rx.dialog.root(
-            rx.dialog.content(
-                rx.dialog.title("Add New Item"),
-                rx.input(placeholder="Item Name", on_change=State.set_new_item_name),
-                rx.input(placeholder="Initial Quantity", on_change=State.set_new_item_qty, type="number", margin_top="2"),
-                rx.flex(
-                    rx.dialog.close(rx.button("Cancel", color_scheme="gray")),
-                    rx.dialog.close(rx.button("Create", on_click=State.submit_add_item)),
-                    spacing="3", margin_top="4", justify="end",
-                ),
-            ),
-            open=State.is_add_modal_open,
-            on_open_change=State.set_is_add_modal_open,
         ),
         
         padding="6",

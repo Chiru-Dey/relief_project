@@ -71,12 +71,19 @@ def admin_delete_item(item_name: str) -> str:
     database.delete_item(item_name)
     return f"SUCCESS: Deleted '{item_name}'."
 
-def admin_restock_item(item_name: str, quantity: int) -> str:
-    """Sets the absolute stock level of an item."""
-    if database.get_item_stock(item_name) == -1:
-        return f"Error: '{item_name}' not found."
-    database.update_stock(item_name, quantity)
-    return f"SUCCESS: {item_name} set to {quantity}."
+def admin_restock_item(item_name: str, quantity_to_add: int) -> str:
+    """
+    Adds stock to an existing item.
+    Args:
+        item_name: Name of the item.
+        quantity_to_add: The amount to ADD to the current stock (e.g., 50 adds 50 units).
+    """
+    current = database.get_item_stock(item_name)
+    if current == -1:
+        return f"Error: Cannot restock '{item_name}' because it does not exist in the database."
+    
+    new_total = database.increment_stock(item_name, quantity_to_add)
+    return f"SUCCESS: Added {quantity_to_add} to {item_name}. New Total: {new_total}."
 
 def admin_batch_update_inventory(updates_json: str) -> str:
     """

@@ -111,3 +111,21 @@ def update_request_status(request_id: int, status: str):
     conn.execute("UPDATE requests SET status = ? WHERE id = ?", (status, request_id))
     conn.commit()
     conn.close()
+    
+def increment_stock(item_name: str, amount_to_add: int) -> int:
+    """
+    Adds the specified amount to the existing stock.
+    Returns the new total quantity.
+    """
+    conn = get_db_connection()
+    # SQLite allows calculation in the UPDATE statement
+    conn.execute(
+        "UPDATE inventory SET quantity = quantity + ? WHERE item_name = ?", 
+        (amount_to_add, item_name)
+    )
+    conn.commit()
+    
+    # Fetch and return the new total
+    row = conn.execute("SELECT quantity FROM inventory WHERE item_name = ?", (item_name,)).fetchone()
+    conn.close()
+    return row['quantity'] if row else 0

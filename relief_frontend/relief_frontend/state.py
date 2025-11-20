@@ -175,7 +175,9 @@ class State(rx.State):
         self.is_restock_modal_open = False # Close modal first
         yield
         
-        async for update in self._run_supervisor_command(f"Restock {self.selected_item_for_restock} to {qty}"):
+        # CHANGED: Phrasing is now "Add X units to Y" 
+        # This ensures the LLM interprets it as an addition, not a set operation.
+        async for update in self._run_supervisor_command(f"Add {qty} units to inventory for item '{self.selected_item_for_restock}'"):
             yield update
 
     async def submit_add_item(self):
