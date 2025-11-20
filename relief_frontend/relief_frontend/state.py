@@ -17,13 +17,12 @@ DB_PATH = "../relief_logistics.db"
 MANAGER_URL = "http://localhost:8001"
 APP_NAME = "relief_app"
 
-# Global Service for session persistence
 GLOBAL_SESSION_SERVICE = InMemorySessionService()
 
 class State(rx.State):
     """The shared application state and logic."""
 
-    # --- QUEUE VISUALIZATION ---
+    # --- QUEUE MANAGEMENT ---
     task_queue: list[str] = []
 
     @rx.var
@@ -38,6 +37,28 @@ class State(rx.State):
     def is_working(self) -> bool:
         return len(self.task_queue) > 0
 
+    async def _wrap_task(self, task_name: str, logic_generator):
+        """
+        Robust Task Wrapper (Async Generator Pattern).
+        1. Adds task to queue -> Update UI.
+        2. Runs the logic (which yields its own updates) -> Update UI.
+        3. Removes task -> Update UI.
+        """
+        self.task_queue.append(task_name)
+        yield # Render UI (Spinner appears)
+        
+        try:
+            # Iterate over the logic generator to execute it step-by-step
+            async for _ in logic_generator:
+                yield # Render any internal updates (logs, text, etc)
+        except Exception as e:
+            self.logs.append(f"Task Error: {e}")
+            yield
+        finally:
+            if task_name in self.task_queue:
+                self.task_queue.remove(task_name)
+            yield # Render UI (Spinner disappears)
+
     # --- CONFIG & HELPERS ---
     def _get_valid_items_string(self) -> str:
         try:
@@ -49,8 +70,7 @@ class State(rx.State):
         except:
             return "water_bottles, food_packs"
 
-    def _get_runner_instance(self, persona: str):
-        """Helper to create a Runner instance. Safe to call from background threads."""
+    def _get_runner(self, persona: str):
         if "GOOGLE_API_KEY" not in os.environ:
             print("❌ Error: GOOGLE_API_KEY not found.")
         
@@ -92,10 +112,11 @@ class State(rx.State):
     chat_history: list[dict] = [{"role": "assistant", "content": "Hello. How can I help?"}]
     input_text: str = ""
     victim_session_id: str = "victim_session_main"
+    is_victim_loading: bool = False
 
-    # --- SYNC DATA FETCH ---
-    async def _fetch_data_now(self):
-        """Updates local state from DB. Must be called inside a lock."""
+    # --- PURE ASYNC DATA FETCH (No Yields) ---
+    async def _fetch_data_internal(self):
+        """Updates local state from DB. Pure async, safe to await."""
         try:
             abs_db_path = os.path.abspath(os.path.join(os.getcwd(), DB_PATH))
             conn = sqlite3.connect(abs_db_path)
@@ -106,29 +127,18 @@ class State(rx.State):
         except Exception as e:
             self.logs.append(f"DB Error: {e}")
 
-    async def refresh_dashboard_data(self):
-        """Public handler for manual refresh."""
-        await self._fetch_data_now()
-
-
-    # --- 🔥 BACKGROUND WORKER (THE FIX) ---
-    
-    @rx.background
-    async def handle_background_command(self, command: str, task_name: str):
+    # --- AGENT LOGIC GENERATOR ---
+    async def _run_supervisor_core_gen(self, command: str):
         """
-        Runs in the background. Does NOT block the UI.
-        Uses 'async with self' only when it needs to update the screen.
+        Async Generator that runs the agent.
+        It MUST yield to allow the UI to update during execution.
         """
-        # 1. Update Queue UI (Start)
-        async with self:
-            self.task_queue.append(task_name)
-            self.logs.append(f"⏳ Started: {task_name}")
+        self.logs.append(f"👮 CMD: {command}")
+        yield # Update logs
 
-        # 2. Run Agent Logic (Heavy lifting - No UI Lock here)
-        runner = self._get_runner_instance("supervisor")
-        session_id = "supervisor_session_bg"
+        runner = self._get_runner("supervisor")
+        session_id = "supervisor_session_main"
         
-        # Create session if needed (safe to ignore error)
         try: await runner.session_service.create_session(app_name=APP_NAME, user_id="sup", session_id=session_id)
         except: pass
         
@@ -139,69 +149,73 @@ class State(rx.State):
             async for event in runner.run_async(user_id="sup", session_id=session_id, new_message=msg):
                 if event.is_final_response() and event.content:
                     final_text = event.content.parts[0].text
+                    # We could yield here to stream text, but block updates are fine
         except Exception as e:
             final_text = f"Agent Error: {str(e)}"
 
-        # 3. Update UI (Finish)
-        async with self:
-            self.logs.append(f"✅ {task_name}: {final_text}")
-            if task_name in self.task_queue:
-                self.task_queue.remove(task_name)
-            
-            # Refresh data to show results (e.g. removed request / updated stock)
-            await self._fetch_data_now()
+        self.logs.append(f"🤖 AGENT: {final_text}")
+        
+        # Refresh data after agent finishes
+        await self._fetch_data_internal()
+        yield # Update Data UI
 
+    # --- SUPERVISOR ACTIONS ---
 
-    # --- SUPERVISOR ACTIONS (Non-Blocking Triggers) ---
+    async def refresh_dashboard_data(self):
+        # Just fetch data and update UI
+        await self._fetch_data_internal()
+        yield
 
-    def submit_supervisor_query(self):
+    async def submit_supervisor_query(self):
         if not self.supervisor_input: return
         cmd = self.supervisor_input
-        self.supervisor_input = "" # Clear UI immediately
-        # Fire background task
-        return State.handle_background_command(cmd, f"Chat: {cmd[:10]}...")
+        self.supervisor_input = "" 
+        # Wrap the generator in the queue manager
+        async for u in self._wrap_task(f"Chat: {cmd[:10]}...", self._run_supervisor_core_gen(cmd)):
+            yield u
 
-    def approve_request(self, req_id: int):
-        return State.handle_background_command(f"Approve request ID {req_id}", f"Approving Req {req_id}")
+    async def approve_request(self, req_id: int):
+        async for u in self._wrap_task(f"Approving {req_id}", self._run_supervisor_core_gen(f"Approve request ID {req_id}")):
+            yield u
 
-    def reject_request(self, req_id: int):
-        return State.handle_background_command(f"Reject request ID {req_id}", f"Rejecting Req {req_id}")
+    async def reject_request(self, req_id: int):
+        async for u in self._wrap_task(f"Rejecting {req_id}", self._run_supervisor_core_gen(f"Reject request ID {req_id}")):
+            yield u
 
-    def submit_restock(self):
+    async def submit_restock(self):
         try: qty = int(self.restock_qty)
         except: qty = 0
-        self.is_restock_modal_open = False # Close UI immediately
+        self.is_restock_modal_open = False
         item = self.selected_item_for_restock
-        return State.handle_background_command(f"Add {qty} units to inventory for item '{item}'", f"Restocking {item}")
+        async for u in self._wrap_task(f"Restocking {item}", self._run_supervisor_core_gen(f"Add {qty} units to inventory for item '{item}'")):
+            yield u
 
-    def submit_add_item(self):
+    async def submit_add_item(self):
         try: qty = int(self.new_item_qty)
         except: qty = 0
-        self.is_add_modal_open = False # Close UI immediately
+        self.is_add_modal_open = False
         name = self.new_item_name
-        return State.handle_background_command(f"Add new item '{name}' with {qty} units", f"Adding {name}")
+        async for u in self._wrap_task(f"Adding {name}", self._run_supervisor_core_gen(f"Add new item '{name}' with {qty} units")):
+            yield u
 
-    
-    # --- VICTIM BACKGROUND WORKER ---
+    # --- VICTIM ACTIONS ---
 
-    @rx.background
-    async def handle_victim_chat_bg(self, user_text: str = None, audio_data = None):
-        """Background handler for victim chat."""
-        async with self:
-            self.is_victim_loading = True
-            if user_text:
-                self.chat_history.append({"role": "user", "content": user_text})
-            else:
-                self.chat_history.append({"role": "user", "content": "🎤 [Audio Sent]"})
+    async def _run_victim_core(self, text_input: str = None, audio_data = None):
+        self.is_victim_loading = True
+        if text_input:
+            self.chat_history.append({"role": "user", "content": text_input})
+        else:
+            self.chat_history.append({"role": "user", "content": "🎤 [Audio Sent]"})
+        yield # Update Chat UI
 
-        runner = self._get_runner_instance("victim")
+        runner = self._get_runner("victim")
         try: await runner.session_service.create_session(app_name=APP_NAME, user_id="vic", session_id=self.victim_session_id)
         except: pass
 
         if audio_data:
              msg = types.Content(role="user", parts=[types.Part(inline_data=types.Blob(mime_type="audio/mp3", data=audio_data))])
         else:
-             msg = types.Content(role="user", parts=[types.Part(text=user_text)])
+             msg = types.Content(role="user", parts=[types.Part(text=text_input)])
 
         response = "..."
         try:
@@ -210,21 +224,22 @@ class State(rx.State):
         except Exception as e:
             response = f"Error: {e}"
 
-        async with self:
-            self.chat_history.append({"role": "assistant", "content": response})
-            self.is_victim_loading = False
+        self.chat_history.append({"role": "assistant", "content": response})
+        self.is_victim_loading = False
+        yield # Final UI Update
 
-
-    def send_message(self):
+    async def send_message(self):
         if not self.input_text: return
         txt = self.input_text
         self.input_text = ""
-        return State.handle_victim_chat_bg(user_text=txt)
+        async for u in self._run_victim_core(text_input=txt):
+            yield u
 
     async def handle_voice_upload(self, files: list[rx.UploadFile]):
         for file in files:
             data = await file.read()
-            return State.handle_victim_chat_bg(audio_data=data)
+            async for u in self._run_victim_core(audio_data=data):
+                yield u
 
     # --- SETTERS ---
     def open_restock_modal(self, item_name: str):
