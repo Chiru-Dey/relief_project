@@ -1,6 +1,5 @@
 google-adk[a2a]
 uvicorn
 python-dotenv
-streamlit
 reflex
 fastapi

@@ -21,7 +21,7 @@ retry_config = types.HttpRetryOptions(attempts=5, exp_base=7, initial_delay=1, h
 database.init_db()
 
 manager_agent = LlmAgent(
-    model=Gemini(model="gemini-2.5-flash-lite", retry_options=retry_config),
+    model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="relief_manager",
     description="Central Disaster Relief Database & Logistics Hub.",
     instruction="""

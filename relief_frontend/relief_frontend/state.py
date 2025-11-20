@@ -17,10 +17,25 @@ load_dotenv()
 # --- CONFIG ---
 DB_PATH = "../relief_logistics.db"
 MANAGER_URL = "http://localhost:8001"
-APP_NAME = "relief_app"  # <--- FIX: Unified App Name
+APP_NAME = "relief_app"
+
+# 🔥 FIX 1: Global Memory Service
+# This ensures conversation history persists across different UI events/reloads
+GLOBAL_SESSION_SERVICE = InMemorySessionService()
 
 class State(rx.State):
     """The shared application state and logic."""
+
+    def _get_valid_items_string(self) -> str:
+        """Helper to get a comma-separated string of valid items for the Prompt."""
+        try:
+            abs_db_path = os.path.abspath(os.path.join(os.getcwd(), DB_PATH))
+            conn = sqlite3.connect(abs_db_path)
+            rows = conn.execute("SELECT item_name FROM inventory").fetchall()
+            conn.close()
+            return ", ".join([r[0] for r in rows])
+        except:
+            return "water_bottles, food_packs, medical_kits" # Fallback
 
     # --- HELPER: SETUP RUNNER ---
     def _get_runner(self, persona: str):
@@ -35,23 +50,46 @@ class State(rx.State):
             agent_card=f"{MANAGER_URL}{AGENT_CARD_WELL_KNOWN_PATH}"
         )
 
+        # 🔥 FIX 2: Inject Inventory Knowledge into Instructions
+        # This helps the Agent map "water" -> "water_bottles" intelligently
+        valid_items = self._get_valid_items_string()
+
         if persona == "supervisor":
             agent = LlmAgent(
                 model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
                 name="supervisor",
-                instruction="You are a Supervisor. Use tools to manage inventory and requests.",
+                instruction=f"""
+                You are a Relief Operation Supervisor.
+                
+                Current Valid Inventory Items: [{valid_items}]
+                
+                Your Job:
+                1. Manage inventory (Add, Restock).
+                2. Approve/Reject pending requests.
+                3. When restocking, ensure you use the EXACT item name from the list above.
+                """,
                 sub_agents=[remote_proxy]
             )
         else:
             agent = LlmAgent(
                 model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
                 name="victim_support",
-                instruction="You are Victim Support. Use tools to help users.",
+                instruction=f"""
+                You are a compassionate Disaster Relief Support agent. 
+                
+                Current Valid Inventory Items: [{valid_items}]
+                
+                Your Job:
+                1. Help victims get supplies immediately.
+                2. INTELLIGENT MAPPING: If a user asks for an item that is semantically similar to a valid item (e.g., "2L water", "bottled water", "H2O" -> "water_bottles"), DO NOT ASK FOR CONFIRMATION. Just use the valid item name ("water_bottles") and call the tool directly.
+                3. Only ask for clarification if the request is completely ambiguous (e.g., "supplies").
+                4. If the user asks for something we clearly don't have (e.g. "iphone"), apologize and list what is available.
+                5. Ask for location if missing.
+                """,
                 sub_agents=[remote_proxy]
             )
-
-        # FIX: Use the constant APP_NAME here
-        return Runner(agent=agent, app_name=APP_NAME, session_service=InMemorySessionService())
+        # 🔥 FIX 3: Use the GLOBAL session service
+        return Runner(agent=agent, app_name=APP_NAME, session_service=GLOBAL_SESSION_SERVICE)
 
     # ==========================
     # SUPERVISOR LOGIC
@@ -63,6 +101,7 @@ class State(rx.State):
     is_add_modal_open: bool = False
     is_restock_modal_open: bool = False
     selected_item_for_restock: str = ""
+    
     new_item_name: str = ""
     new_item_qty: str = "0" 
     restock_qty: str = "0"
@@ -85,17 +124,20 @@ class State(rx.State):
         self.logs.append(f"👮 CMD: {command}")
         runner = self._get_runner("supervisor")
         
-        # FIX: Use the constant APP_NAME here
-        session = await runner.session_service.create_session(
-            app_name=APP_NAME, 
-            user_id="sup", 
-            session_id=str(uuid.uuid4())
-        )
+        # Supervisor sessions are usually one-off commands, so we can keep generating IDs
+        # But using a static ID allows for "follow up" questions if needed.
+        session_id = "supervisor_session_main" 
+        
+        try:
+            # Try create
+            await runner.session_service.create_session(app_name=APP_NAME, user_id="sup", session_id=session_id)
+        except:
+            pass # Already exists
         
         msg = types.Content(role="user", parts=[types.Part(text=command)])
         response_text = "..."
         
-        async for event in runner.run_async(user_id="sup", session_id=session.id, new_message=msg):
+        async for event in runner.run_async(user_id="sup", session_id=session_id, new_message=msg):
             if event.is_final_response() and event.content:
                 response_text = event.content.parts[0].text
         
@@ -113,14 +155,12 @@ class State(rx.State):
     async def submit_restock(self):
         try: qty = int(self.restock_qty)
         except ValueError: qty = 0
-            
         await self._run_supervisor_command(f"Restock {self.selected_item_for_restock} to {qty}")
         self.is_restock_modal_open = False
 
     async def submit_add_item(self):
         try: qty = int(self.new_item_qty)
         except ValueError: qty = 0
-            
         await self._run_supervisor_command(f"Add new item '{self.new_item_name}' with {qty} units")
         self.is_add_modal_open = False
 
@@ -129,12 +169,11 @@ class State(rx.State):
     # ==========================
     chat_history: list[dict] = [{"role": "assistant", "content": "Hello. You can type or upload a voice message."}]
     input_text: str = ""
-    victim_session_id: str = str(uuid.uuid4())
+    victim_session_id: str = "victim_session_main" # Fixed ID for persistence
 
     async def handle_voice_upload(self, files: list[rx.UploadFile]):
         runner = self._get_runner("victim")
         try: 
-            # FIX: Use the constant APP_NAME here
             await runner.session_service.create_session(
                 app_name=APP_NAME, 
                 user_id="vic", 
@@ -166,7 +205,6 @@ class State(rx.State):
         
         runner = self._get_runner("victim")
         try: 
-            # FIX: Use the constant APP_NAME here
             await runner.session_service.create_session(
                 app_name=APP_NAME, 
                 user_id="vic", 
@@ -182,3 +220,13 @@ class State(rx.State):
                 response_text = event.content.parts[0].text
         
         self.chat_history.append({"role": "assistant", "content": response_text})
+
+    # ==========================
+    # EXPLICIT SETTERS
+    # ==========================
+    def set_input_text(self, val: str): self.input_text = val
+    def set_is_add_modal_open(self, val: bool): self.is_add_modal_open = val
+    def set_is_restock_modal_open(self, val: bool): self.is_restock_modal_open = val
+    def set_restock_qty(self, val: str): self.restock_qty = val
+    def set_new_item_name(self, val: str): self.new_item_name = val
+    def set_new_item_qty(self, val: str): self.new_item_qty = val
