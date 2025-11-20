@@ -19,8 +19,7 @@ DB_PATH = "../relief_logistics.db"
 MANAGER_URL = "http://localhost:8001"
 APP_NAME = "relief_app"
 
-# 🔥 FIX 1: Global Memory Service
-# This ensures conversation history persists across different UI events/reloads
+# Global Memory Service for persistence
 GLOBAL_SESSION_SERVICE = InMemorySessionService()
 
 class State(rx.State):
@@ -35,7 +34,7 @@ class State(rx.State):
             conn.close()
             return ", ".join([r[0] for r in rows])
         except:
-            return "water_bottles, food_packs, medical_kits" # Fallback
+            return "water_bottles, food_packs, medical_kits"
 
     # --- HELPER: SETUP RUNNER ---
     def _get_runner(self, persona: str):
@@ -50,8 +49,6 @@ class State(rx.State):
             agent_card=f"{MANAGER_URL}{AGENT_CARD_WELL_KNOWN_PATH}"
         )
 
-        # 🔥 FIX 2: Inject Inventory Knowledge into Instructions
-        # This helps the Agent map "water" -> "water_bottles" intelligently
         valid_items = self._get_valid_items_string()
 
         if persona == "supervisor":
@@ -66,7 +63,13 @@ class State(rx.State):
                 Your Job:
                 1. Manage inventory (Add, Restock).
                 2. Approve/Reject pending requests.
-                3. When restocking, ensure you use the EXACT item name from the list above.
+                
+                CRITICAL RULES:
+                - You do NOT have direct access to the database tools.
+                - You MUST delegate all actions to your sub-agent 'relief_manager'.
+                - To approve a request, ask 'relief_manager' to approve request ID X.
+                - To restock, ask 'relief_manager' to restock item Y to quantity Z.
+                - To add items, ask 'relief_manager' to add item A with quantity B.
                 """,
                 sub_agents=[remote_proxy]
             )
@@ -88,7 +91,7 @@ class State(rx.State):
                 """,
                 sub_agents=[remote_proxy]
             )
-        # 🔥 FIX 3: Use the GLOBAL session service
+
         return Runner(agent=agent, app_name=APP_NAME, session_service=GLOBAL_SESSION_SERVICE)
 
     # ==========================
@@ -124,20 +127,21 @@ class State(rx.State):
         self.logs.append(f"👮 CMD: {command}")
         runner = self._get_runner("supervisor")
         
-        # Supervisor sessions are usually one-off commands, so we can keep generating IDs
-        # But using a static ID allows for "follow up" questions if needed.
-        session_id = "supervisor_session_main" 
-        
+        session_id = "supervisor_session_main"
         try:
-            # Try create
             await runner.session_service.create_session(app_name=APP_NAME, user_id="sup", session_id=session_id)
         except:
-            pass # Already exists
+            pass
         
         msg = types.Content(role="user", parts=[types.Part(text=command)])
         response_text = "..."
         
         async for event in runner.run_async(user_id="sup", session_id=session_id, new_message=msg):
+            if event.content and event.content.parts:
+                for part in event.content.parts:
+                    if part.function_call:
+                        print(f"🔧 Tool Call Detected: {part.function_call.name}")
+
             if event.is_final_response() and event.content:
                 response_text = event.content.parts[0].text
         
@@ -169,7 +173,7 @@ class State(rx.State):
     # ==========================
     chat_history: list[dict] = [{"role": "assistant", "content": "Hello. You can type or upload a voice message."}]
     input_text: str = ""
-    victim_session_id: str = "victim_session_main" # Fixed ID for persistence
+    victim_session_id: str = "victim_session_main"
 
     async def handle_voice_upload(self, files: list[rx.UploadFile]):
         runner = self._get_runner("victim")
