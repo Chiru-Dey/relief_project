@@ -132,6 +132,7 @@ class State(rx.State):
     supervisor_input: str = ""
     chat_history: list[dict] = [{"role": "assistant", "content": "Hello. How can I help?"}]
     input_text: str = ""
+    is_victim_loading: bool = False 
     
     my_client_id: str = str(uuid.uuid4())
     task_queue: list[str] = []
@@ -150,11 +151,9 @@ class State(rx.State):
     def is_working(self) -> bool:
         return len(self.task_queue) > 0
 
-    # --- POLLING HANDLER (FIXED SIGNATURE) ---
-    # date=None handles the positional arg from rx.moment
-    # **kwargs catches any internal event args to prevent crashes
-    async def check_job_results(self, date=None, **kwargs):
-        """Checks global store for finished threads."""
+    # --- POLLING HANDLER (STRICT SIGNATURE FIX) ---
+    async def check_job_results(self, date: str):
+        """Checks global store for finished threads. Accepts exactly one arg from rx.moment."""
         await self._fetch_data_internal()
 
         if self.my_client_id in GLOBAL_JOB_STORE:
@@ -168,6 +167,7 @@ class State(rx.State):
                         self.logs.append(f"✅ {task}: {out}")
                     else:
                         self.chat_history.append({"role": "assistant", "content": out})
+                        self.is_victim_loading = False 
                     
                     if task in self.task_queue:
                         self.task_queue.remove(task)
@@ -191,6 +191,7 @@ class State(rx.State):
             self.logs.append(f"⏳ Queued: {task_name}")
         elif persona == "victim" and command and not command.startswith("AUDIO:"):
             self.chat_history.append({"role": "user", "content": command})
+            self.is_victim_loading = True 
 
         t = threading.Thread(
             target=background_agent_worker, 
@@ -245,6 +246,7 @@ class State(rx.State):
         self.audio_data_bridge = data 
         if data:
             self.chat_history.append({"role": "user", "content": "🎤 [Voice Message Sent]"})
+            self.is_victim_loading = True
             self._dispatch(f"AUDIO:{data}", "Processing Voice...", persona="victim")
 
     # --- EXPLICIT SETTERS ---
