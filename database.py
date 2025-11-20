@@ -3,10 +3,12 @@ import sqlite3
 DB_FILE = "relief_logistics.db"
 
 def init_db():
-    """Initializes the database with updated schema."""
+    """Initializes the database with tables and seed data."""
     conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
     
+    conn.execute("PRAGMA journal_mode=WAL;")
+    
+    c = conn.cursor()
     # 1. Inventory Table
     c.execute('''CREATE TABLE IF NOT EXISTS inventory (
                     item_name TEXT PRIMARY KEY,

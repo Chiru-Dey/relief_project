@@ -21,11 +21,11 @@ def victim_ui():
                             max_width="80%"
                         )
                     ),
-                    # STATUS INDICATOR (Only visible if queue active)
+                    # QUEUE INDICATOR
                     rx.cond(
-                        State.is_working,
+                        State.is_victim_loading,
                         rx.hstack(
-                            rx.spinner(size="1"),
+                            rx.spinner(size="1", color_scheme="blue"),
                             rx.text("Support Agent is working...", color="gray", size="2", style={"fontStyle": "italic"}),
                             spacing="2", margin_top="2"
                         )
@@ -49,20 +49,5 @@ def victim_ui():
         ),
         
         rx.divider(margin_y="4"),
-        
-        # VOICE INPUT
-        rx.box(
-            rx.text("🎙️ Voice Mode (Gemini 2.5)", size="2", weight="bold", color="gray", margin_bottom="2"),
-            rx.upload(
-                rx.button(rx.icon("mic"), "Upload Voice Message / Recording", color_scheme="purple", variant="surface", width="100%"),
-                id="upload1",
-                multiple=False,
-                accept={"audio/*": [".mp3", ".wav", ".m4a", ".ogg"]},
-                max_files=1,
-                on_drop=State.handle_voice_upload,
-                border="1px dotted gray",
-                padding="2"
-            ),
-        ),
         max_width="600px", padding_y="6"
     )

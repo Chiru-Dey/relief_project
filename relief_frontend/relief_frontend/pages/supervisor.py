@@ -32,7 +32,7 @@ def supervisor_ui():
                     spacing="2"
                 ), width="30%"
             ),
-            rx.button("🔄 Refresh Data", on_click=State.refresh_dashboard_data, size="4", margin_top="2"),
+            rx.button("🔄 Refresh", on_click=State.refresh_dashboard_data, size="4", margin_top="2"),
             spacing="4", width="100%", margin_bottom="6"
         ),
 
@@ -50,7 +50,7 @@ def supervisor_ui():
                         rx.hstack(
                             rx.text(item["item_name"], weight="bold", size="4"),
                             rx.spacer(),
-                            rx.badge(f"{item['quantity']} units", color_scheme=rx.cond(item["quantity"].to(int) < 20, "red", "green"), size="3"),
+                            rx.badge(f"{item['quantity']} units", color_scheme="blue", size="3"),
                             rx.button("Restock", size="1", on_click=lambda: State.open_restock_modal(item["item_name"]))
                         ), margin_bottom="2"
                     )
@@ -91,7 +91,6 @@ def supervisor_ui():
         # COMMAND CENTER
         rx.box(
             rx.heading("💬 Command Center", size="5", margin_bottom="2"),
-            rx.text("Execute complex tasks via natural language.", size="2", color="gray", margin_bottom="2"),
             rx.hstack(
                 rx.input(
                     placeholder="E.g. 'Restock water_bottles by adding 500'",
