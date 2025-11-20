@@ -37,28 +37,6 @@ class State(rx.State):
     def is_working(self) -> bool:
         return len(self.task_queue) > 0
 
-    async def _wrap_task(self, task_name: str, logic_generator):
-        """
-        Robust Task Wrapper (Async Generator Pattern).
-        1. Adds task to queue -> Update UI.
-        2. Runs the logic (which yields its own updates) -> Update UI.
-        3. Removes task -> Update UI.
-        """
-        self.task_queue.append(task_name)
-        yield # Render UI (Spinner appears)
-        
-        try:
-            # Iterate over the logic generator to execute it step-by-step
-            async for _ in logic_generator:
-                yield # Render any internal updates (logs, text, etc)
-        except Exception as e:
-            self.logs.append(f"Task Error: {e}")
-            yield
-        finally:
-            if task_name in self.task_queue:
-                self.task_queue.remove(task_name)
-            yield # Render UI (Spinner disappears)
-
     # --- CONFIG & HELPERS ---
     def _get_valid_items_string(self) -> str:
         try:
@@ -112,11 +90,10 @@ class State(rx.State):
     chat_history: list[dict] = [{"role": "assistant", "content": "Hello. How can I help?"}]
     input_text: str = ""
     victim_session_id: str = "victim_session_main"
-    is_victim_loading: bool = False
 
-    # --- PURE ASYNC DATA FETCH (No Yields) ---
+    # --- PURE ASYNC DATA FETCH ---
     async def _fetch_data_internal(self):
-        """Updates local state from DB. Pure async, safe to await."""
+        """Updates local state variables from DB."""
         try:
             abs_db_path = os.path.abspath(os.path.join(os.getcwd(), DB_PATH))
             conn = sqlite3.connect(abs_db_path)
@@ -127,119 +104,133 @@ class State(rx.State):
         except Exception as e:
             self.logs.append(f"DB Error: {e}")
 
-    # --- AGENT LOGIC GENERATOR ---
-    async def _run_supervisor_core_gen(self, command: str):
+    # --- 🔥 THE BACKGROUND ENGINE ---
+    
+    async def _run_agent_background_task(self, command: str, task_name: str, persona: str = "supervisor"):
         """
-        Async Generator that runs the agent.
-        It MUST yield to allow the UI to update during execution.
+        This runs OUTSIDE the main event loop lock.
+        It interacts with the LLM, then locks state briefly to update UI.
         """
-        self.logs.append(f"👮 CMD: {command}")
-        yield # Update logs
-
-        runner = self._get_runner("supervisor")
-        session_id = "supervisor_session_main"
+        runner = self._get_runner(persona)
+        session_id = f"{persona}_session_bg"
         
-        try: await runner.session_service.create_session(app_name=APP_NAME, user_id="sup", session_id=session_id)
-        except: pass
-        
+        # Agent Execution (Slow part - No UI Lock)
         msg = types.Content(role="user", parts=[types.Part(text=command)])
         final_text = "..."
         
         try:
-            async for event in runner.run_async(user_id="sup", session_id=session_id, new_message=msg):
+            # Ensure session
+            try: await runner.session_service.create_session(app_name=APP_NAME, user_id=persona, session_id=session_id)
+            except: pass
+
+            async for event in runner.run_async(user_id=persona, session_id=session_id, new_message=msg):
                 if event.is_final_response() and event.content:
                     final_text = event.content.parts[0].text
-                    # We could yield here to stream text, but block updates are fine
         except Exception as e:
             final_text = f"Agent Error: {str(e)}"
 
-        self.logs.append(f"🤖 AGENT: {final_text}")
-        
-        # Refresh data after agent finishes
-        await self._fetch_data_internal()
-        yield # Update Data UI
+        # UI Update (Fast part - Acquires Lock)
+        async with self:
+            if persona == "supervisor":
+                self.logs.append(f"✅ {task_name}: {final_text}")
+                await self._fetch_data_internal()
+            
+            # Remove from queue
+            if task_name in self.task_queue:
+                self.task_queue.remove(task_name)
 
-    # --- SUPERVISOR ACTIONS ---
+    # --- SUPERVISOR ACTIONS (FIRE AND FORGET) ---
 
     async def refresh_dashboard_data(self):
-        # Just fetch data and update UI
         await self._fetch_data_internal()
-        yield
 
     async def submit_supervisor_query(self):
         if not self.supervisor_input: return
         cmd = self.supervisor_input
         self.supervisor_input = "" 
-        # Wrap the generator in the queue manager
-        async for u in self._wrap_task(f"Chat: {cmd[:10]}...", self._run_supervisor_core_gen(cmd)):
-            yield u
+        
+        # 1. Update Queue UI immediately
+        self.task_queue.append(f"Chat: {cmd[:10]}...")
+        
+        # 2. Fire background task (Does not wait)
+        asyncio.create_task(self._run_agent_background_task(cmd, f"Chat: {cmd[:10]}..."))
 
     async def approve_request(self, req_id: int):
-        async for u in self._wrap_task(f"Approving {req_id}", self._run_supervisor_core_gen(f"Approve request ID {req_id}")):
-            yield u
+        task_name = f"Approving Req {req_id}"
+        self.task_queue.append(task_name)
+        asyncio.create_task(self._run_agent_background_task(f"Approve request ID {req_id}", task_name))
 
     async def reject_request(self, req_id: int):
-        async for u in self._wrap_task(f"Rejecting {req_id}", self._run_supervisor_core_gen(f"Reject request ID {req_id}")):
-            yield u
+        task_name = f"Rejecting Req {req_id}"
+        self.task_queue.append(task_name)
+        asyncio.create_task(self._run_agent_background_task(f"Reject request ID {req_id}", task_name))
 
     async def submit_restock(self):
         try: qty = int(self.restock_qty)
         except: qty = 0
         self.is_restock_modal_open = False
         item = self.selected_item_for_restock
-        async for u in self._wrap_task(f"Restocking {item}", self._run_supervisor_core_gen(f"Add {qty} units to inventory for item '{item}'")):
-            yield u
+        
+        task_name = f"Restocking {item}"
+        self.task_queue.append(task_name)
+        
+        cmd = f"Add {qty} units to inventory for item '{item}'"
+        asyncio.create_task(self._run_agent_background_task(cmd, task_name))
 
     async def submit_add_item(self):
         try: qty = int(self.new_item_qty)
         except: qty = 0
         self.is_add_modal_open = False
         name = self.new_item_name
-        async for u in self._wrap_task(f"Adding {name}", self._run_supervisor_core_gen(f"Add new item '{name}' with {qty} units")):
-            yield u
+        
+        task_name = f"Adding {name}"
+        self.task_queue.append(task_name)
+        
+        cmd = f"Add new item '{name}' with {qty} units"
+        asyncio.create_task(self._run_agent_background_task(cmd, task_name))
 
-    # --- VICTIM ACTIONS ---
+    # --- VICTIM ACTIONS (FIRE AND FORGET) ---
 
-    async def _run_victim_core(self, text_input: str = None, audio_data = None):
-        self.is_victim_loading = True
-        if text_input:
-            self.chat_history.append({"role": "user", "content": text_input})
-        else:
-            self.chat_history.append({"role": "user", "content": "🎤 [Audio Sent]"})
-        yield # Update Chat UI
-
+    async def _run_victim_bg(self, msg_content, task_name):
         runner = self._get_runner("victim")
-        try: await runner.session_service.create_session(app_name=APP_NAME, user_id="vic", session_id=self.victim_session_id)
-        except: pass
-
-        if audio_data:
-             msg = types.Content(role="user", parts=[types.Part(inline_data=types.Blob(mime_type="audio/mp3", data=audio_data))])
-        else:
-             msg = types.Content(role="user", parts=[types.Part(text=text_input)])
-
+        session_id = self.victim_session_id
+        
         response = "..."
         try:
-            async for event in runner.run_async(user_id="vic", session_id=self.victim_session_id, new_message=msg):
+            try: await runner.session_service.create_session(app_name=APP_NAME, user_id="vic", session_id=session_id)
+            except: pass
+
+            async for event in runner.run_async(user_id="vic", session_id=session_id, new_message=msg_content):
                 if event.is_final_response() and event.content: response = event.content.parts[0].text
         except Exception as e:
             response = f"Error: {e}"
 
-        self.chat_history.append({"role": "assistant", "content": response})
-        self.is_victim_loading = False
-        yield # Final UI Update
+        async with self:
+            self.chat_history.append({"role": "assistant", "content": response})
+            if task_name in self.task_queue:
+                self.task_queue.remove(task_name)
 
     async def send_message(self):
         if not self.input_text: return
         txt = self.input_text
         self.input_text = ""
-        async for u in self._run_victim_core(text_input=txt):
-            yield u
+        
+        # Update UI
+        self.chat_history.append({"role": "user", "content": txt})
+        self.task_queue.append("Support Agent Thinking...")
+        
+        # Fire Background
+        msg = types.Content(role="user", parts=[types.Part(text=txt)])
+        asyncio.create_task(self._run_victim_bg(msg, "Support Agent Thinking..."))
 
     async def handle_voice_upload(self, files: list[rx.UploadFile]):
         for file in files:
             data = await file.read()
-            async for u in self._run_victim_core(audio_data=data):
-                yield u
+            self.chat_history.append({"role": "user", "content": "🎤 [Audio Sent]"})
+            self.task_queue.append("Processing Voice...")
+            
+            msg = types.Content(role="user", parts=[types.Part(inline_data=types.Blob(mime_type="audio/mp3", data=data))])
+            asyncio.create_task(self._run_victim_bg(msg, "Processing Voice..."))
 
     # --- SETTERS ---
     def open_restock_modal(self, item_name: str):
