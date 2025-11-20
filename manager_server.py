@@ -39,16 +39,19 @@ manager_agent = LlmAgent(
         # Client Tools
         tools_client.check_inventory,
         tools_client.request_relief,
-        tools_client.check_request_status, 
+        tools_client.check_request_status,
         
         # Supervisor Tools
         tools_supervisor.supervisor_view_pending_requests,
         tools_supervisor.supervisor_decide_request,
+        tools_supervisor.supervisor_batch_decide_requests, # <--- NEW
+        
         tools_supervisor.admin_view_full_inventory,
         tools_supervisor.admin_restock_item,
-        tools_supervisor.admin_add_new_item,      
-        tools_supervisor.admin_delete_item,       
-        tools_supervisor.admin_get_low_stock_report 
+        tools_supervisor.admin_add_new_item,
+        tools_supervisor.admin_delete_item,
+        tools_supervisor.admin_get_low_stock_report,
+        tools_supervisor.admin_batch_update_inventory     # <--- NEW
     ]
 )
 

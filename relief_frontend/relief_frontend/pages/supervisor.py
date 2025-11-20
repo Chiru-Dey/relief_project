@@ -7,47 +7,31 @@ def supervisor_ui():
         
         # METRICS ROW
         rx.flex(
-            # CARD 1: Total Items
             rx.card(
                 rx.vstack(
                     rx.text("Total Inventory Items", size="2", weight="medium", color="gray"),
-                    rx.heading(
-                        rx.cond(State.inventory, State.inventory.length(), 0),
-                        size="7"
-                    ),
+                    rx.heading(rx.cond(State.inventory, State.inventory.length(), 0), size="7"),
                     spacing="2"
-                ),
-                width="30%"
+                ), width="30%"
             ),
-            
-            # CARD 2: Pending Requests
             rx.card(
                 rx.vstack(
                     rx.text("Pending Approvals", size="2", weight="medium", color="gray"),
-                    rx.heading(
-                        rx.cond(State.requests, State.requests.length(), 0),
-                        size="7",
-                        color_scheme="red"
-                    ),
+                    rx.heading(rx.cond(State.requests, State.requests.length(), 0), size="7", color_scheme="red"),
                     spacing="2"
-                ),
-                width="30%"
+                ), width="30%"
             ),
-            
             rx.button("🔄 Refresh Data", on_click=State.refresh_dashboard_data, size="4", margin_top="2"),
-            spacing="4",
-            width="100%",
-            margin_bottom="6"
+            spacing="4", width="100%", margin_bottom="6"
         ),
 
         rx.grid(
-            # INVENTORY COLUMN
+            # INVENTORY
             rx.box(
                 rx.hstack(
                     rx.heading("📦 Inventory", size="5"),
                     rx.button("➕ Add Item", on_click=lambda: State.set_is_add_modal_open(True)),
-                    justify="between",
-                    margin_bottom="2"
+                    justify="between", margin_bottom="2"
                 ),
                 rx.foreach(
                     State.inventory,
@@ -55,20 +39,17 @@ def supervisor_ui():
                         rx.hstack(
                             rx.text(item["item_name"], weight="bold", size="4"),
                             rx.spacer(),
-                            # FIX APPLIED BELOW: .to(int)
                             rx.badge(
                                 f"{item['quantity']} units", 
                                 color_scheme=rx.cond(item["quantity"].to(int) < 20, "red", "green"), 
                                 size="3"
                             ),
                             rx.button("Restock", size="1", on_click=lambda: State.open_restock_modal(item["item_name"]))
-                        ),
-                        margin_bottom="2"
+                        ), margin_bottom="2"
                     )
                 ),
             ),
-            
-            # REQUESTS COLUMN
+            # REQUESTS
             rx.box(
                 rx.heading("🚨 Request Queue", size="5", margin_bottom="2"),
                 rx.cond(
@@ -87,31 +68,43 @@ def supervisor_ui():
                                 rx.hstack(
                                     rx.button("✅ Approve", color_scheme="green", on_click=lambda: State.approve_request(req["id"])),
                                     rx.button("❌ Reject", color_scheme="red", on_click=lambda: State.reject_request(req["id"])),
-                                    spacing="2",
-                                    margin_top="2"
-                                ),
-                                align="start"
-                            ),
-                            margin_bottom="2"
+                                    spacing="2", margin_top="2"
+                                ), align="start"
+                            ), margin_bottom="2"
                         )
                     )
                 )
             ),
-            columns="2",
-            spacing="6"
+            columns="2", spacing="6"
+        ),
+
+        rx.divider(margin_y="4"),
+
+        # --- COMMAND INTERFACE (NEW) ---
+        rx.box(
+            rx.heading("💬 Command Center", size="5", margin_bottom="2"),
+            rx.text("Execute complex tasks via natural language.", size="2", color="gray", margin_bottom="2"),
+            rx.hstack(
+                rx.input(
+                    placeholder="E.g. 'Restock water_bottles to 500 and add 50 tents'",
+                    value=State.supervisor_input,
+                    on_change=State.set_supervisor_input,
+                    on_key_down=lambda e: rx.cond(e == "Enter", State.submit_supervisor_query(), None),
+                    width="100%"
+                ),
+                rx.button(rx.icon("send"), on_click=State.submit_supervisor_query, color_scheme="blue"),
+            ),
+            margin_bottom="4"
         ),
 
         # ACTIVITY LOG
-        rx.divider(margin_y="4"),
         rx.text("Agent Activity Log", weight="bold"),
         rx.scroll_area(
             rx.vstack(rx.foreach(State.logs, lambda log: rx.text(log, font_family="monospace", size="1"))),
-            height="150px", bg="gray.50", padding="2", border_radius="md"
+            height="200px", bg="gray.50", padding="2", border_radius="md"
         ),
 
-        # --- MODALS ---
-        
-        # Restock Modal
+        # --- MODALS (Same as before) ---
         rx.dialog.root(
             rx.dialog.content(
                 rx.dialog.title("Restock Item"),
@@ -126,8 +119,6 @@ def supervisor_ui():
             open=State.is_restock_modal_open,
             on_open_change=State.set_is_restock_modal_open,
         ),
-
-        # Add Item Modal
         rx.dialog.root(
             rx.dialog.content(
                 rx.dialog.title("Add New Item"),

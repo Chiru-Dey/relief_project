@@ -26,7 +26,7 @@ class State(rx.State):
     """The shared application state and logic."""
 
     def _get_valid_items_string(self) -> str:
-        """Helper to get a comma-separated string of valid items for the Prompt."""
+        # ... (Keep existing logic) ...
         try:
             abs_db_path = os.path.abspath(os.path.join(os.getcwd(), DB_PATH))
             conn = sqlite3.connect(abs_db_path)
@@ -36,10 +36,11 @@ class State(rx.State):
         except:
             return "water_bottles, food_packs, medical_kits"
 
-    # --- HELPER: SETUP RUNNER ---
     def _get_runner(self, persona: str):
+        # ... (Keep existing logic) ...
+        # (Ensure your instructions mentioned delegation as per previous fix)
         if "GOOGLE_API_KEY" not in os.environ:
-            print("❌ Error: GOOGLE_API_KEY not found. Please check your .env file.")
+            print("❌ Error: GOOGLE_API_KEY not found.")
 
         retry_config = types.HttpRetryOptions(attempts=3, initial_delay=1)
         
@@ -57,19 +58,25 @@ class State(rx.State):
                 name="supervisor",
                 instruction=f"""
                 You are a Relief Operation Supervisor.
-                
                 Current Valid Inventory Items: [{valid_items}]
                 
-                Your Job:
-                1. Manage inventory (Add, Restock).
-                2. Approve/Reject pending requests.
+                Your Job: Manage inventory and approvals efficiently.
                 
                 CRITICAL RULES:
-                - You do NOT have direct access to the database tools.
-                - You MUST delegate all actions to your sub-agent 'relief_manager'.
-                - To approve a request, ask 'relief_manager' to approve request ID X.
-                - To restock, ask 'relief_manager' to restock item Y to quantity Z.
-                - To add items, ask 'relief_manager' to add item A with quantity B.
+                1. **Delegation**: You have NO direct DB access. Ask 'relief_manager' to do everything.
+                
+                2. **BATCH OPERATIONS (PREFERRED)**:
+                   - If the user wants to approve/reject multiple items (e.g., "Approve all", "Reject IDs 1, 2, and 5"):
+                     a. First, call `supervisor_view_pending_requests` to get the IDs.
+                     b. Then, use `supervisor_batch_decide_requests` with a JSON list of IDs (e.g., "[1, 2, 5]").
+                   
+                   - If the user wants to restock/add multiple items (e.g., "Restock everything to 100", "Add tents and heaters"):
+                     a. If "all", call `admin_view_full_inventory` to get names.
+                     b. Use `admin_batch_update_inventory` with a JSON dictionary (e.g., '{{"water_bottles": 100, "food": 100}}').
+                     c. This tool handles both updating existing items and creating new ones.
+                
+                3. **Single Operations**:
+                   - Use single tools (approve_request, restock_item) only for individual tasks.
                 """,
                 sub_agents=[remote_proxy]
             )
@@ -79,15 +86,12 @@ class State(rx.State):
                 name="victim_support",
                 instruction=f"""
                 You are a compassionate Disaster Relief Support agent. 
-                
                 Current Valid Inventory Items: [{valid_items}]
                 
                 Your Job:
                 1. Help victims get supplies immediately.
-                2. INTELLIGENT MAPPING: If a user asks for an item that is semantically similar to a valid item (e.g., "2L water", "bottled water", "H2O" -> "water_bottles"), DO NOT ASK FOR CONFIRMATION. Just use the valid item name ("water_bottles") and call the tool directly.
-                3. Only ask for clarification if the request is completely ambiguous (e.g., "supplies").
-                4. If the user asks for something we clearly don't have (e.g. "iphone"), apologize and list what is available.
-                5. Ask for location if missing.
+                2. INTELLIGENT MAPPING: Map generic terms (e.g. "water") to valid items ("water_bottles").
+                3. Ask 'relief_manager' to fulfill requests.
                 """,
                 sub_agents=[remote_proxy]
             )
@@ -108,9 +112,12 @@ class State(rx.State):
     new_item_name: str = ""
     new_item_qty: str = "0" 
     restock_qty: str = "0"
+    
+    # --- NEW: Supervisor Chat Input ---
+    supervisor_input: str = ""
 
     async def refresh_dashboard_data(self):
-        """Fetches raw data from SQLite for the dashboard."""
+        # ... (Keep existing logic) ...
         try:
             abs_db_path = os.path.abspath(os.path.join(os.getcwd(), DB_PATH))
             conn = sqlite3.connect(abs_db_path)
@@ -121,7 +128,7 @@ class State(rx.State):
             self.requests = [dict(r) for r in req_rows]
             conn.close()
         except Exception as e:
-            self.logs.append(f"DB Connection Error ({DB_PATH}): {str(e)}")
+            self.logs.append(f"DB Error: {str(e)}")
 
     async def _run_supervisor_command(self, command: str):
         self.logs.append(f"👮 CMD: {command}")
@@ -130,25 +137,26 @@ class State(rx.State):
         session_id = "supervisor_session_main"
         try:
             await runner.session_service.create_session(app_name=APP_NAME, user_id="sup", session_id=session_id)
-        except:
-            pass
+        except: pass
         
         msg = types.Content(role="user", parts=[types.Part(text=command)])
         response_text = "..."
         
         async for event in runner.run_async(user_id="sup", session_id=session_id, new_message=msg):
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    if part.function_call:
-                        print(f"🔧 Tool Call Detected: {part.function_call.name}")
-
             if event.is_final_response() and event.content:
                 response_text = event.content.parts[0].text
         
         self.logs.append(f"🤖 AGENT: {response_text}")
         await self.refresh_dashboard_data()
 
-    # Actions
+    # --- NEW: Supervisor Chat Handler ---
+    async def submit_supervisor_query(self):
+        if not self.supervisor_input: return
+        cmd = self.supervisor_input
+        self.supervisor_input = "" # Clear input immediately
+        await self._run_supervisor_command(cmd)
+
+    # Actions (Buttons)
     async def approve_request(self, req_id: int): await self._run_supervisor_command(f"Approve request ID {req_id}")
     async def reject_request(self, req_id: int): await self._run_supervisor_command(f"Reject request ID {req_id}")
     
@@ -169,7 +177,7 @@ class State(rx.State):
         self.is_add_modal_open = False
 
     # ==========================
-    # VICTIM LOGIC
+    # VICTIM LOGIC (Keep as is)
     # ==========================
     chat_history: list[dict] = [{"role": "assistant", "content": "Hello. You can type or upload a voice message."}]
     input_text: str = ""
@@ -177,28 +185,18 @@ class State(rx.State):
 
     async def handle_voice_upload(self, files: list[rx.UploadFile]):
         runner = self._get_runner("victim")
-        try: 
-            await runner.session_service.create_session(
-                app_name=APP_NAME, 
-                user_id="vic", 
-                session_id=self.victim_session_id
-            )
+        try: await runner.session_service.create_session(app_name=APP_NAME, user_id="vic", session_id=self.victim_session_id)
         except: pass
 
         for file in files:
             upload_data = await file.read()
             self.chat_history.append({"role": "user", "content": "🎤 [Audio Message Sent]"})
-            
-            msg = types.Content(
-                role="user", 
-                parts=[types.Part(inline_data=types.Blob(mime_type="audio/mp3", data=upload_data))]
-            )
+            msg = types.Content(role="user", parts=[types.Part(inline_data=types.Blob(mime_type="audio/mp3", data=upload_data))])
             
             response_text = ""
             async for event in runner.run_async(user_id="vic", session_id=self.victim_session_id, new_message=msg):
                 if event.is_final_response() and event.content:
                     response_text = event.content.parts[0].text
-            
             self.chat_history.append({"role": "assistant", "content": response_text})
 
     async def send_message(self):
@@ -208,21 +206,14 @@ class State(rx.State):
         self.input_text = ""
         
         runner = self._get_runner("victim")
-        try: 
-            await runner.session_service.create_session(
-                app_name=APP_NAME, 
-                user_id="vic", 
-                session_id=self.victim_session_id
-            )
+        try: await runner.session_service.create_session(app_name=APP_NAME, user_id="vic", session_id=self.victim_session_id)
         except: pass
 
         msg = types.Content(role="user", parts=[types.Part(text=text)])
-        
         response_text = ""
         async for event in runner.run_async(user_id="vic", session_id=self.victim_session_id, new_message=msg):
             if event.is_final_response() and event.content:
                 response_text = event.content.parts[0].text
-        
         self.chat_history.append({"role": "assistant", "content": response_text})
 
     # ==========================
@@ -234,3 +225,6 @@ class State(rx.State):
     def set_restock_qty(self, val: str): self.restock_qty = val
     def set_new_item_name(self, val: str): self.new_item_name = val
     def set_new_item_qty(self, val: str): self.new_item_qty = val
+    
+    # --- NEW SETTER ---
+    def set_supervisor_input(self, val: str): self.supervisor_input = val
