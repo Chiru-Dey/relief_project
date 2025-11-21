@@ -4,23 +4,26 @@ import json
 # --- REQUEST MANAGEMENT ---
 
 def supervisor_view_pending_requests() -> str:
-    """Returns a list of all requests with status 'PENDING', sorted by urgency."""
+    """Returns a list of all requests with status 'PENDING' or 'FLAGGED', sorted by urgency."""
     rows = database.get_pending_requests()
     if not rows: 
-        return "No pending requests found."
+        return "No requests or system flags require attention."
     
-    result = "Pending Requests (Sorted by Urgency):\n"
+    result = "Attention Queue (Pending Approvals & System Flags):\n"
     for r in rows:
-        urgency_mark = "🔴 CRITICAL" if r['urgency'] == 'CRITICAL' else "⚪ Normal"
-        result += f"- ID {r['id']} [{urgency_mark}]: {r['quantity']}x {r['item_name']} for {r['location']}\n"
+        if r['status'] == 'FLAGGED':
+            result += f"- 🚩 FLAG (ID {r['id']}): {r['notes']}\n"
+        else:
+            urgency_mark = "🔴 CRITICAL" if r['urgency'] == 'CRITICAL' else "⚪ Normal"
+            result += f"- ID {r['id']} [{urgency_mark}]: {r['quantity']}x {r['item_name']} for {r['location']}\n"
     return result
 
 def supervisor_decide_request(request_id: int, decision: str) -> str:
-    """Supervisor tool to APPROVE or REJECT a single request ID."""
+    """Supervisor tool to APPROVE or REJECT a single PENDING request ID."""
     decision = decision.upper()
     req = database.get_request_by_id(request_id)
     if not req: return f"Error: Request ID {request_id} not found."
-    if req['status'] != 'PENDING': return f"Error: Request {request_id} is already {req['status']}."
+    if req['status'] != 'PENDING': return f"Error: Request {request_id} is not PENDING. Current status: {req['status']}."
 
     if decision == "REJECT":
         database.update_request_status(request_id, "REJECTED")
@@ -33,16 +36,11 @@ def supervisor_decide_request(request_id: int, decision: str) -> str:
         
         new_stock = current_stock - req['quantity']
         database.update_stock(req['item_name'], new_stock)
-        database.update_request_status(request_id, "APPROVED")
-        return f"Request {request_id} APPROVED. New stock: {new_stock}."
+        database.update_request_status(request_id, "APPROVED_MANUAL") # Note new status
+        return f"Request {request_id} manually APPROVED. New stock: {new_stock}."
 
 def supervisor_batch_decide_requests(request_ids_json: str, decision: str) -> str:
-    """
-    Batch approve or reject multiple requests at once.
-    Args:
-        request_ids_json: A JSON string list of integers, e.g., "[1, 2, 5]"
-        decision: "APPROVE" or "REJECT"
-    """
+    """Batch approve or reject multiple PENDING requests at once."""
     try:
         req_ids = json.loads(request_ids_json)
         if not isinstance(req_ids, list): raise ValueError
@@ -59,21 +57,18 @@ def supervisor_batch_decide_requests(request_ids_json: str, decision: str) -> st
 # --- INVENTORY MANAGEMENT (CRUD) ---
 
 def admin_add_new_item(item_name: str, initial_quantity: int) -> str:
-    """Creates a new type of item in the inventory system."""
     if database.get_item_stock(item_name) != -1:
         return f"Error: Item '{item_name}' already exists."
     database.add_new_item(item_name, initial_quantity)
     return f"SUCCESS: Added '{item_name}'."
 
 def admin_delete_item(item_name: str) -> str:
-    """Permanently deletes an item type."""
     if database.get_item_stock(item_name) == -1:
         return f"Error: Item '{item_name}' does not exist."
     database.delete_item(item_name)
     return f"SUCCESS: Deleted '{item_name}'."
 
 def admin_restock_item(item_name: str, quantity_to_add: int) -> str:
-    """Adds stock to an existing item."""
     current = database.get_item_stock(item_name)
     if current == -1:
         return f"Error: Cannot restock '{item_name}' because it does not exist."
@@ -82,10 +77,6 @@ def admin_restock_item(item_name: str, quantity_to_add: int) -> str:
     return f"SUCCESS: Added {quantity_to_add} to {item_name}. New Total: {new_total}."
 
 def admin_batch_update_inventory(updates_json: str) -> str:
-    """
-    Batch update multiple inventory items at once.
-    Example: '{"water_bottles": 500, "tents": 50}'
-    """
     try:
         updates = json.loads(updates_json)
         if not isinstance(updates, dict): raise ValueError
@@ -122,12 +113,8 @@ def admin_get_low_stock_report(threshold: int = 20) -> str:
         result += f"- {r['item_name']}: Only {r['quantity']} left\n"
     return result
 
-# --- NEW AUDIT TOOL ---
 def supervisor_view_audit_log(limit: int = 10) -> str:
-    """
-    Views the most recent approved or rejected requests (both AI and human).
-    Useful for auditing and seeing what the AI has done.
-    """
+    """Views the most recent completed requests (AI and human approved)."""
     rows = database.get_recent_completed_requests(limit)
     if not rows:
         return "No completed requests in the log."
@@ -137,3 +124,15 @@ def supervisor_view_audit_log(limit: int = 10) -> str:
         status_tag = f"[{r['status']}]"
         result += f"- ID {r['id']} {status_tag}: {r['quantity']}x {r['item_name']} for {r['location']}\n"
     return result
+
+# --- 🔥 FIX: ADDED MISSING FUNCTION ---
+def log_user_complaint(complaint_text: str) -> str:
+    """
+    Logs a non-urgent issue, user complaint, or inventory gap for a supervisor to review later.
+    Use this when a user reports a problem that the agent cannot solve itself.
+    """
+    if not complaint_text:
+        return "ERROR: Complaint text cannot be empty."
+    
+    database.create_system_log(complaint_text)
+    return "SUCCESS: The issue has been logged and flagged for supervisor attention."

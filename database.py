@@ -27,7 +27,7 @@ def init_db():
     
     # 3. Seed Data
     c.execute("SELECT count(*) FROM inventory")
-    if c.fetchone()[0] == 0:
+    if c.fetchone() == 0:
         print("🌱 Seeding database with initial inventory...")
         seed_data = [
             ("water_bottles", 100), ("food_packs", 50),
@@ -104,8 +104,9 @@ def create_request(item_name: str, quantity: int, location: str, status: str, ur
     return req_id
 
 def get_pending_requests() -> list[dict]:
+    """Returns a list of requests that are PENDING or FLAGGED for review."""
     conn = get_db_connection()
-    rows = conn.execute("SELECT * FROM requests WHERE status = 'PENDING' ORDER BY urgency DESC, id ASC").fetchall()
+    rows = conn.execute("SELECT * FROM requests WHERE status = 'PENDING' OR status = 'FLAGGED' ORDER BY urgency DESC, id ASC").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -121,13 +122,24 @@ def update_request_status(request_id: int, status: str):
     conn.commit()
     conn.close()
 
-# --- NEW FUNCTION FOR AUDIT ---
 def get_recent_completed_requests(limit: int = 10) -> list[dict]:
-    """Returns a list of the most recent non-pending requests."""
+    """Returns a list of the most recent non-pending and non-flagged requests."""
     conn = get_db_connection()
     rows = conn.execute(
-        "SELECT * FROM requests WHERE status != 'PENDING' ORDER BY id DESC LIMIT ?", 
+        "SELECT * FROM requests WHERE status != 'PENDING' AND status != 'FLAGGED' ORDER BY id DESC LIMIT ?", 
         (limit,)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+def create_system_log(notes: str):
+    """Creates a non-actionable log for supervisor review with status FLAGGED."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    # We use special values to distinguish it from a real request
+    cursor.execute(
+        "INSERT INTO requests (item_name, quantity, location, status, urgency, notes) VALUES (?, ?, ?, ?, ?, ?)",
+        ("SYSTEM_NOTE", 0, "N/A", "FLAGGED", "NORMAL", notes)
+    )
+    conn.commit()
+    conn.close()

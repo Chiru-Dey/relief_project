@@ -27,41 +27,37 @@ def initialize_adk_agents():
 
     retry_config = types.HttpRetryOptions(attempts=3)
     
-    # Create separate proxy instances to avoid parent-child conflicts
     proxy_vic = RemoteA2aAgent(name="relief_manager", description="Hub", agent_card=f"http://localhost:8001{AGENT_CARD_WELL_KNOWN_PATH}")
     proxy_sup = RemoteA2aAgent(name="relief_manager", description="Hub", agent_card=f"http://localhost:8001{AGENT_CARD_WELL_KNOWN_PATH}")
 
     valid_items = "water_bottles, food_packs, medical_kits, blankets, batteries"
 
-    # --- 🔥 NEW, STRICT INSTRUCTIONS for Victim Agent ---
+    # Victim Agent
     victim_agent = LlmAgent(
         model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
         name="victim_support_flask",
-        instruction=f"""
-        You are a Disaster Relief Support agent. Your goal is to process relief requests accurately.
-
-        CRITICAL WORKFLOW:
-        1.  **Identify Items:** Identify all items the user asks for (e.g., "bandages", "batteries").
-        2.  **Verify Inventory:** For EACH item, you MUST first call the `check_inventory` tool via the 'relief_manager'.
-            - If the tool returns an ERROR that the item is not found, you MUST inform the user and list the available items. DO NOT proceed with the invalid item.
-            - Example: If user asks for "bandages", the tool will return "ERROR: Item 'bandages' not found...". You must tell the user "Sorry, we don't have bandages, but we do have medical_kits." and ask if they want that instead.
-        3.  **Confirm Location:** If the location is not clear from the conversation, you must ask for it.
-        4.  **Dispatch SEPARATELY:** For EACH valid and available item, you MUST make a separate call to the `request_relief` tool. Do NOT try to request multiple items in a single call.
-        5.  **Summarize:** After all tool calls are complete, provide a final, clear summary to the user detailing what was successfully dispatched and what failed (and why).
-        """,
+        instruction=f"Victim Support. Items: [{valid_items}]. Map generic terms. Delegate to 'relief_manager'.",
         sub_agents=[proxy_vic]
     )
     VICTIM_RUNNER = Runner(agent=victim_agent, app_name="victim_frontend", session_service=SESSION_SERVICE)
     
-    # --- Supervisor Agent (Instructions remain the same) ---
+    # --- 🔥 NEW, STRICT SUPERVISOR INSTRUCTIONS ---
     supervisor_agent = LlmAgent(
         model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
         name="supervisor_flask",
         instruction=f"""
-        You are a Relief Operation Supervisor. Your role is to AUDIT and OVERSEE.
-        - Most requests are auto-approved by the AI. You can view them with 'supervisor_view_audit_log'.
-        - You only need to act on requests in the 'supervisor_view_pending_requests' queue.
-        - You have full inventory control.
+        You are a Relief Operation Supervisor. Your job is to manage inventory and approvals by delegating tasks to your sub-agent, 'relief_manager'.
+
+        CRITICAL WORKFLOW FOR BATCH OPERATIONS (e.g., "add 7 items"):
+        1.  **Acknowledge and Gather:** If the user's request is vague (like "add 7 items"), you MUST ask for the specific names and quantities for each item.
+        2.  **Construct JSON:** Once you have the list of items and quantities, you MUST construct a single, valid JSON dictionary string. The keys must be the EXACT item names (e.g., "water_bottles") and the values must be integers.
+            - Correct Example: '{{"water_bottles": 50, "tents": 20}}'
+            - Incorrect: 'water_bottles: 50, tents: 20' (This is not valid JSON)
+        3.  **Execute Batch Tool:** You MUST then ask 'relief_manager' to call the `admin_batch_update_inventory` tool, passing the complete JSON string you created as the `updates_json` argument.
+        4.  **Confirm:** Relay the success or failure message from the tool call back to the user.
+
+        - For single-item tasks (e.g., "approve request 5"), you can call the specific tool directly via 'relief_manager'.
+        - ALWAYS use your tools. Do not hallucinate actions.
         """,
         sub_agents=[proxy_sup]
     )
@@ -76,7 +72,7 @@ async def run_agent_query(runner, user_id, session_id, message):
     try:
         await runner.session_service.create_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
     except Exception:
-        pass  # Session likely already exists
+        pass
 
     final_response = "Sorry, an agent error occurred."
     try:
@@ -85,6 +81,6 @@ async def run_agent_query(runner, user_id, session_id, message):
                 final_response = event.content.parts[0].text
     except Exception as e:
         final_response = f"Agent Error: {e}"
-        print(f"ERROR in run_agent_query: {e}") # Log to server console
+        print(f"ERROR in run_agent_query: {e}")
     
     return final_response

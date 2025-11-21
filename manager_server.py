@@ -1,7 +1,7 @@
 import os
 import uvicorn
 from google.adk.agents import LlmAgent
-from google.adk.tools import AgentTool # <--- FIXED
+from google.adk.tools import AgentTool # <--- THE FIX IS HERE
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.models.google_llm import Gemini
 from google.genai import types
@@ -21,27 +21,32 @@ retry_config = types.HttpRetryOptions(attempts=3)
 database.init_db()
 
 # --- 1. THE TRIAGE AGENT ---
+# This agent's only job is to classify the request's intent.
 triage_agent = LlmAgent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="triage_agent",
     instruction="""
     Analyze the user's request. Your only job is to classify the request.
-    - If the user explicitly mentions "supervisor", "manual approval", "human", or similar, you MUST respond with the single word: MANUAL.
+    - If the user explicitly mentions "supervisor", "manual approval", "human", "inform him", or "complaint", you MUST respond with the single word: MANUAL.
     - For all other standard requests, you MUST respond with the single word: AUTO.
     Do not add any other text or explanation.
     """
 )
 
 # --- 2. THE MAIN MANAGER AGENT ---
+# It now uses the Triage Agent as a tool to make decisions.
 manager_agent = LlmAgent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="relief_manager",
     description="Central Disaster Relief Database & Logistics Hub.",
     instruction="""
-    You are the Central Relief Manager. You have two main jobs: handling supervisor commands and processing relief requests.
+    You are the Central Relief Manager. You have three main jobs: handling supervisor commands, processing relief requests, and logging complaints.
 
     **For Supervisor Commands:**
     If the request is from a supervisor (e.g., 'approve', 'restock', 'audit'), use the appropriate supervisor or admin tool directly.
+
+    **For User Complaints:**
+    If a user reports an issue (e.g. a missing item like "bandages"), you MUST use the `log_user_complaint` tool to flag it for a supervisor.
 
     **For Relief Requests (from victims):**
     You MUST follow this two-step process:
@@ -63,6 +68,7 @@ manager_agent = LlmAgent(
         tools_supervisor.supervisor_decide_request,
         tools_supervisor.supervisor_batch_decide_requests,
         tools_supervisor.supervisor_view_audit_log,
+        tools_supervisor.log_user_complaint,
         
         tools_supervisor.admin_view_full_inventory,
         tools_supervisor.admin_restock_item,
