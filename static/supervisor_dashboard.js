@@ -1,84 +1,176 @@
 document.addEventListener("DOMContentLoaded", () => {
+    // --- ELEMENT REFERENCES ---
     const logContainer = document.getElementById("logContainer");
-    // Generate a unique ID for this browser tab session
-    const CLIENT_ID = 'sup_' + Math.random().toString(36).substring(2, 9);
+    const inventoryList = document.getElementById("inventoryList");
+    const requestList = document.getElementById("requestList");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const commandInput = document.getElementById("commandInput");
+    const commandSendBtn = document.getElementById("commandSendBtn");
     
-    // --- API CALLS ---
-    async function submitTask(payload) {
-        // Just puts the job on the queue, doesn't wait for it
-        await fetch("/api/submit_task", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...payload, client_id: CLIENT_ID }),
-        });
-    }
+    // Modals
+    const restockModal = document.getElementById("restockModal");
+    const addItemModal = document.getElementById("addItemModal");
+    const addItemBtn = document.getElementById("addItemBtn");
     
-    async function pollResults() {
+    let currentRestockItem = "";
+
+    // --- API & DATA HANDLING ---
+
+    async function runCommand(command, taskName) {
+        log(`⏳ Queued: ${taskName}`);
         try {
-            const res = await fetch(`/api/get_results/${CLIENT_ID}`);
-            const data = await res.json();
-            if (data.results && data.results.length > 0) {
-                data.results.forEach(result => {
-                    log(`✅ ${result.task_name}: ${result.output}`);
-                });
-                fetchData(); // Refresh data after a result comes in
-            }
+            const response = await fetch("/api/supervisor_command", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ command }),
+            });
+            const data = await response.json();
+            log(`✅ ${taskName}: ${data.reply}`);
         } catch (e) {
-            console.error("Polling error", e);
+            log(`❌ Command Error: ${e}`);
         }
+        fetchData(); // Refresh all data after every action
     }
 
     async function fetchData() {
-        const res = await fetch("/api/supervisor_data");
-        const data = await res.json();
-        if (data.error) { log(`DB Error: ${data.error}`); return; }
-        renderInventory(data.inventory);
-        renderRequests(data.requests);
+        try {
+            const res = await fetch("/api/supervisor_data");
+            const data = await res.json();
+            if (data.error) {
+                log(`DB Error: ${data.error}`);
+                return;
+            }
+            renderInventory(data.inventory);
+            renderRequests(data.requests);
+        } catch (e) {
+            log(`Network Error fetching data: ${e}`);
+        }
     }
 
-    // --- RENDER FUNCTIONS ---
-    function renderInventory(items) { /* ... (same as before) ... */ }
-    function renderRequests(requests) { /* ... (same as before) ... */ }
+    // --- RENDER LOGIC ---
+
+    function renderInventory(items) {
+        inventoryList.innerHTML = ""; // Clear list before re-rendering
+        if (!items || items.length === 0) {
+            inventoryList.innerHTML = "<p>No inventory found.</p>";
+            return;
+        }
+        items.forEach(item => {
+            const div = document.createElement("div");
+            div.className = "inventory-item";
+            div.innerHTML = `
+                <span><strong>${item.item_name.replace(/_/g, ' ')}</strong></span>
+                <div>
+                    <span style="margin-right: 1rem; color: ${item.quantity < 20 ? '#F87171' : 'inherit'};">${item.quantity} units</span>
+                    <button class="restock-btn" data-item="${item.item_name}">Restock</button>
+                </div>
+            `;
+            inventoryList.appendChild(div);
+        });
+    }
+
+    function renderRequests(requests) {
+        requestList.innerHTML = "";
+        if (!requests || requests.length === 0) {
+            requestList.innerHTML = "<p>No pending requests.</p>";
+            return;
+        }
+        requests.forEach(req => {
+            const div = document.createElement("div");
+            div.className = "request-item";
+            const criticalSpan = req.urgency === 'CRITICAL' ? '<span style="color:#F87171; font-weight: bold; margin-left: 8px;">CRITICAL</span>' : '';
+            div.innerHTML = `
+                <div class="request-details">
+                    <strong>ID ${req.id}:</strong> ${req.quantity}x ${req.item_name.replace(/_/g, ' ')} for ${req.location}
+                    ${criticalSpan}
+                </div>
+                <div class="request-actions">
+                    <button class="approve-btn" data-id="${req.id}">Approve</button>
+                    <button class="reject-btn" data-id="${req.id}" style="background-color:#DC2626;">Reject</button>
+                </div>
+            `;
+            requestList.appendChild(div);
+        });
+    }
 
     function log(message) {
         const p = document.createElement("p");
-        p.textContent = message;
+        p.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        // Prepend to show new logs at the top and keep view scrolled there
         logContainer.prepend(p);
     }
+
+    // --- MODAL HANDLING ---
+
+    // Show
+    inventoryList.addEventListener("click", e => {
+        if (e.target.classList.contains("restock-btn")) {
+            currentRestockItem = e.target.dataset.item;
+            document.getElementById("restockItemName").textContent = currentRestockItem.replace(/_/g, ' ');
+            restockModal.classList.remove("hidden");
+        }
+    });
+    addItemBtn.addEventListener("click", () => addItemModal.classList.remove("hidden"));
+
+    // Hide
+    document.getElementById("cancelRestock").addEventListener("click", () => restockModal.classList.add("hidden"));
+    document.getElementById("cancelAddItem").addEventListener("click", () => addItemModal.classList.add("hidden"));
+
+    // Submit
+    document.getElementById("confirmRestock").addEventListener("click", () => {
+        const qtyInput = document.getElementById("restockQtyInput");
+        const qty = qtyInput.value;
+        if (qty && currentRestockItem) {
+            runCommand(`Add ${qty} units to inventory for item '${currentRestockItem}'`, `Restocking ${currentRestockItem}`);
+            restockModal.classList.add("hidden");
+            qtyInput.value = "";
+        }
+    });
+    document.getElementById("confirmAddItem").addEventListener("click", () => {
+        const nameInput = document.getElementById("newItemNameInput");
+        const qtyInput = document.getElementById("newItemQtyInput");
+        const name = nameInput.value;
+        const qty = qtyInput.value;
+        if (name && qty) {
+            runCommand(`Add new item '${name}' with ${qty} units`, `Adding ${name}`);
+            addItemModal.classList.add("hidden");
+            nameInput.value = "";
+            qtyInput.value = "";
+        }
+    });
     
-    // --- UI EVENT LISTENERS ---
+    // --- EVENT LISTENERS ---
     
-    // Command Input
-    document.getElementById("commandSendBtn").addEventListener("click", () => {
-        const input = document.getElementById("commandInput");
-        if (input.value) {
-            const taskName = `Command: ${input.value.substring(0, 20)}...`;
-            log(`⏳ Queued: ${taskName}`);
-            submitTask({
-                persona: "supervisor",
-                command: input.value,
-                task_name: taskName,
-            });
-            input.value = "";
+    // Refresh Button
+    refreshBtn.addEventListener("click", fetchData);
+    
+    // Command Center
+    commandSendBtn.addEventListener("click", () => {
+        if (commandInput.value) {
+            runCommand(commandInput.value, `Command: ${commandInput.value.substring(0, 25)}...`);
+            commandInput.value = "";
+        }
+    });
+    commandInput.addEventListener("keydown", e => {
+        if (e.key === "Enter") {
+            commandSendBtn.click();
         }
     });
 
-    // Request Buttons
-    document.getElementById("requestList").addEventListener("click", e => {
+    // Action Buttons on Request Items
+    requestList.addEventListener("click", e => {
         const id = e.target.dataset.id;
+        if (!id) return;
+
         if (e.target.classList.contains("approve-btn")) {
-            const taskName = `Approving Req ${id}`;
-            log(`⏳ Queued: ${taskName}`);
-            submitTask({ persona: "supervisor", command: `Approve request ID ${id}`, task_name: taskName });
+            runCommand(`Approve request ID ${id}`, `Approving Req ${id}`);
         }
         if (e.target.classList.contains("reject-btn")) {
-            const taskName = `Rejecting Req ${id}`;
-            log(`⏳ Queued: ${taskName}`);
-            submitTask({ persona: "supervisor", command: `Reject request ID ${id}`, task_name: taskName });
+            runCommand(`Reject request ID ${id}`, `Rejecting Req ${id}`);
         }
     });
 
     // --- INITIAL LOAD & POLLING ---
     fetchData();
-    setInterval(pollResults, 1000); // Check for results every second
+    setInterval(fetchData, 5000); // Auto-refresh data every 5 seconds
 });
