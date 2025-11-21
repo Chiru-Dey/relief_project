@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supervisor Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='supervisor_styles.css') }}">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- HEADER -->
+        <header>
+            <h1>👮 Relief Operations Dashboard</h1>
+            <button id="refreshBtn">🔄 Refresh Data</button>
+        </header>
+
+        <!-- GRIDS -->
+        <div class="grid-container">
+            <!-- INVENTORY -->
+            <div class="grid-item">
+                <div class="item-header">
+                    <h2>📦 Inventory</h2>
+                    <button id="addItemBtn" class="action-btn">➕ Add Item</button>
+                </div>
+                <div id="inventoryList" class="item-list">
+                    <!-- JS will render inventory here -->
+                    <p>Loading inventory...</p>
+                </div>
+            </div>
+
+            <!-- REQUESTS -->
+            <div class="grid-item">
+                <div class="item-header">
+                    <h2>🚨 Request Queue</h2>
+                </div>
+                <div id="requestList" class="item-list">
+                    <!-- JS will render requests here -->
+                    <p>Loading requests...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- COMMAND CENTER -->
+        <div class="command-center">
+            <h2>💬 Command Center</h2>
+            <div class="input-row">
+                <input type="text" id="commandInput" placeholder="E.g., 'Restock all items to 100'">
+                <button id="commandSendBtn">Send Command</button>
+            </div>
+        </div>
+
+        <!-- LOGS -->
+        <div class="logs">
+            <h2>Activity Log</h2>
+            <div id="logContainer" class="log-box">
+                <p>System initialized. Waiting for commands...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALS (Hidden by default) -->
+    <div id="restockModal" class="modal-backdrop hidden">
+        <div class="modal">
+            <h3>Restock Item: <span id="restockItemName"></span></h3>
+            <input type="number" id="restockQtyInput" placeholder="Amount to ADD">
+            <div class="modal-actions">
+                <button id="cancelRestock">Cancel</button>
+                <button id="confirmRestock">Add Stock</button>
+            </div>
+        </div>
+    </div>
+    <div id="addItemModal" class="modal-backdrop hidden">
+        <div class="modal">
+            <h3>Add New Item</h3>
+            <input type="text" id="newItemNameInput" placeholder="Item Name (e.g., 'tents')">
+            <input type="number" id="newItemQtyInput" placeholder="Initial Quantity">
+            <div class="modal-actions">
+                <button id="cancelAddItem">Cancel</button>
+                <button id="confirmAddItem">Create Item</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='supervisor_dashboard.js') }}"></script>
+</body>
+</html>

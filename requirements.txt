@@ -1,5 +1,5 @@
 google-adk[a2a]
 uvicorn
 python-dotenv
-reflex
 fastapi
+flask[async]
