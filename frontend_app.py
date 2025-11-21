@@ -73,9 +73,9 @@ def agent_worker():
         session_id = job.get("session_id", "default_session")
         
         user_message = None
-        if "text" in job:
+        if "text" in job and job["text"]:
             user_message = types.Content(role="user", parts=[types.Part(text=job["text"])])
-        elif "audio" in job:
+        elif "audio" in job and job["audio"]:
             try:
                 header, encoded = job["audio"].split(",", 1)
                 audio_bytes = base64.b64decode(encoded)
@@ -128,6 +128,7 @@ def submit_task():
     TASK_QUEUE.put(data)
     return jsonify({"status": "queued"})
 
+# 🔥 RESTORED POLLING ENDPOINT
 @app.route("/api/get_results/<client_id>", methods=["GET"])
 def get_results(client_id):
     """The poller endpoint for both UIs."""
@@ -151,4 +152,5 @@ if __name__ == "__main__":
     initialize_adk_agents()
     worker_thread = threading.Thread(target=agent_worker, daemon=True)
     worker_thread.start()
+    # use_reloader=False is CRITICAL for this background thread pattern
     app.run(port=5000, debug=True, use_reloader=False)

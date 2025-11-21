@@ -3,19 +3,18 @@ import sqlite3
 DB_FILE = "relief_logistics.db"
 
 def init_db():
-    """Initializes the database with tables and seed data."""
+    """Initializes the database with updated schema."""
     conn = sqlite3.connect(DB_FILE)
-    
     conn.execute("PRAGMA journal_mode=WAL;")
-    
     c = conn.cursor()
+    
     # 1. Inventory Table
     c.execute('''CREATE TABLE IF NOT EXISTS inventory (
                     item_name TEXT PRIMARY KEY,
                     quantity INTEGER
                 )''')
     
-    # 2. Requests Table (Added 'urgency' column)
+    # 2. Requests Table
     c.execute('''CREATE TABLE IF NOT EXISTS requests (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     item_name TEXT,
@@ -31,11 +30,8 @@ def init_db():
     if c.fetchone()[0] == 0:
         print("🌱 Seeding database with initial inventory...")
         seed_data = [
-            ("water_bottles", 100),
-            ("food_packs", 50),
-            ("medical_kits", 10),
-            ("blankets", 30),
-            ("batteries", 200)
+            ("water_bottles", 100), ("food_packs", 50),
+            ("medical_kits", 10), ("blankets", 30), ("batteries", 200)
         ]
         c.executemany("INSERT INTO inventory (item_name, quantity) VALUES (?, ?)", seed_data)
         conn.commit()
@@ -47,13 +43,19 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# --- INVENTORY CRUD ---
+# --- INVENTORY OPERATIONS ---
 
 def get_item_stock(item_name: str) -> int:
     conn = get_db_connection()
     row = conn.execute("SELECT quantity FROM inventory WHERE item_name = ?", (item_name,)).fetchone()
     conn.close()
     return row['quantity'] if row else -1
+
+def get_all_item_names() -> list[str]:
+    conn = get_db_connection()
+    rows = conn.execute("SELECT item_name FROM inventory").fetchall()
+    conn.close()
+    return [r['item_name'] for r in rows]
 
 def get_all_items() -> list[dict]:
     conn = get_db_connection()
@@ -62,14 +64,12 @@ def get_all_items() -> list[dict]:
     return [dict(r) for r in rows]
 
 def add_new_item(item_name: str, quantity: int):
-    """Adds a new item type to the database."""
     conn = get_db_connection()
     conn.execute("INSERT INTO inventory (item_name, quantity) VALUES (?, ?)", (item_name, quantity))
     conn.commit()
     conn.close()
 
 def delete_item(item_name: str):
-    """Permanently removes an item type from inventory."""
     conn = get_db_connection()
     conn.execute("DELETE FROM inventory WHERE item_name = ?", (item_name,))
     conn.commit()
@@ -80,6 +80,14 @@ def update_stock(item_name: str, new_quantity: int):
     conn.execute("UPDATE inventory SET quantity = ? WHERE item_name = ?", (new_quantity, item_name))
     conn.commit()
     conn.close()
+    
+def increment_stock(item_name: str, amount_to_add: int) -> int:
+    conn = get_db_connection()
+    conn.execute("UPDATE inventory SET quantity = quantity + ? WHERE item_name = ?", (amount_to_add, item_name))
+    conn.commit()
+    row = conn.execute("SELECT quantity FROM inventory WHERE item_name = ?", (item_name,)).fetchone()
+    conn.close()
+    return row['quantity'] if row else 0
 
 # --- REQUEST OPERATIONS ---
 
@@ -97,7 +105,6 @@ def create_request(item_name: str, quantity: int, location: str, status: str, ur
 
 def get_pending_requests() -> list[dict]:
     conn = get_db_connection()
-    # prioritize CRITICAL requests first
     rows = conn.execute("SELECT * FROM requests WHERE status = 'PENDING' ORDER BY urgency DESC, id ASC").fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -113,21 +120,14 @@ def update_request_status(request_id: int, status: str):
     conn.execute("UPDATE requests SET status = ? WHERE id = ?", (status, request_id))
     conn.commit()
     conn.close()
-    
-def increment_stock(item_name: str, amount_to_add: int) -> int:
-    """
-    Adds the specified amount to the existing stock.
-    Returns the new total quantity.
-    """
+
+# --- NEW FUNCTION FOR AUDIT ---
+def get_recent_completed_requests(limit: int = 10) -> list[dict]:
+    """Returns a list of the most recent non-pending requests."""
     conn = get_db_connection()
-    # SQLite allows calculation in the UPDATE statement
-    conn.execute(
-        "UPDATE inventory SET quantity = quantity + ? WHERE item_name = ?", 
-        (amount_to_add, item_name)
-    )
-    conn.commit()
-    
-    # Fetch and return the new total
-    row = conn.execute("SELECT quantity FROM inventory WHERE item_name = ?", (item_name,)).fetchone()
+    rows = conn.execute(
+        "SELECT * FROM requests WHERE status != 'PENDING' ORDER BY id DESC LIMIT ?", 
+        (limit,)
+    ).fetchall()
     conn.close()
-    return row['quantity'] if row else 0
+    return [dict(r) for r in rows]

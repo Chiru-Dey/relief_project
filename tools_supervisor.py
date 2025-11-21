@@ -6,7 +6,8 @@ import json
 def supervisor_view_pending_requests() -> str:
     """Returns a list of all requests with status 'PENDING', sorted by urgency."""
     rows = database.get_pending_requests()
-    if not rows: return "No pending requests found."
+    if not rows: 
+        return "No pending requests found."
     
     result = "Pending Requests (Sorted by Urgency):\n"
     for r in rows:
@@ -19,11 +20,11 @@ def supervisor_decide_request(request_id: int, decision: str) -> str:
     decision = decision.upper()
     req = database.get_request_by_id(request_id)
     if not req: return f"Error: Request ID {request_id} not found."
-    if req['status'] != 'PENDING': return f"Error: Request {request_id} is {req['status']}."
+    if req['status'] != 'PENDING': return f"Error: Request {request_id} is already {req['status']}."
 
     if decision == "REJECT":
         database.update_request_status(request_id, "REJECTED")
-        return f"Request {request_id} REJECTED."
+        return f"Request {request_id} has been REJECTED."
     
     if decision == "APPROVE":
         current_stock = database.get_item_stock(req['item_name'])
@@ -33,7 +34,7 @@ def supervisor_decide_request(request_id: int, decision: str) -> str:
         new_stock = current_stock - req['quantity']
         database.update_stock(req['item_name'], new_stock)
         database.update_request_status(request_id, "APPROVED")
-        return f"Request {request_id} APPROVED."
+        return f"Request {request_id} APPROVED. New stock: {new_stock}."
 
 def supervisor_batch_decide_requests(request_ids_json: str, decision: str) -> str:
     """
@@ -72,15 +73,10 @@ def admin_delete_item(item_name: str) -> str:
     return f"SUCCESS: Deleted '{item_name}'."
 
 def admin_restock_item(item_name: str, quantity_to_add: int) -> str:
-    """
-    Adds stock to an existing item.
-    Args:
-        item_name: Name of the item.
-        quantity_to_add: The amount to ADD to the current stock (e.g., 50 adds 50 units).
-    """
+    """Adds stock to an existing item."""
     current = database.get_item_stock(item_name)
     if current == -1:
-        return f"Error: Cannot restock '{item_name}' because it does not exist in the database."
+        return f"Error: Cannot restock '{item_name}' because it does not exist."
     
     new_total = database.increment_stock(item_name, quantity_to_add)
     return f"SUCCESS: Added {quantity_to_add} to {item_name}. New Total: {new_total}."
@@ -88,9 +84,7 @@ def admin_restock_item(item_name: str, quantity_to_add: int) -> str:
 def admin_batch_update_inventory(updates_json: str) -> str:
     """
     Batch update multiple inventory items at once.
-    Args:
-        updates_json: JSON dictionary string {"item_name": quantity, ...}
-                      Example: '{"water_bottles": 500, "tents": 50}'
+    Example: '{"water_bottles": 500, "tents": 50}'
     """
     try:
         updates = json.loads(updates_json)
@@ -100,7 +94,6 @@ def admin_batch_update_inventory(updates_json: str) -> str:
 
     log = []
     for item, qty in updates.items():
-        # Check if item exists; if not, add it automatically (Upsert logic)
         if database.get_item_stock(item) == -1:
             database.add_new_item(item, qty)
             log.append(f"Created & Set {item} to {qty}")
@@ -127,4 +120,20 @@ def admin_get_low_stock_report(threshold: int = 20) -> str:
     result = f"⚠️ LOW STOCK ALERT (< {threshold} units):\n"
     for r in low_stock:
         result += f"- {r['item_name']}: Only {r['quantity']} left\n"
+    return result
+
+# --- NEW AUDIT TOOL ---
+def supervisor_view_audit_log(limit: int = 10) -> str:
+    """
+    Views the most recent approved or rejected requests (both AI and human).
+    Useful for auditing and seeing what the AI has done.
+    """
+    rows = database.get_recent_completed_requests(limit)
+    if not rows:
+        return "No completed requests in the log."
+    
+    result = f"Audit Log (Last {limit} completed requests):\n"
+    for r in rows:
+        status_tag = f"[{r['status']}]"
+        result += f"- ID {r['id']} {status_tag}: {r['quantity']}x {r['item_name']} for {r['location']}\n"
     return result
