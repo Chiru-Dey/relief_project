@@ -11,16 +11,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- State ---
     let isListening = false;
-    // Generate a unique ID for this browser tab session
+    // Generate unique IDs for this browser tab
     const CLIENT_ID = 'vic_' + Math.random().toString(36).substring(2, 9);
     let sessionId = 'session_' + Date.now();
 
-    // --- Functions ---
+    // --- Core Functions ---
+
     function autoResize() {
         textarea.style.height = 'auto';
         textarea.style.height = `${textarea.scrollHeight}px`;
-        if (textarea.scrollHeight > MAX_HEIGHT) textarea.style.overflowY = 'auto';
-        else textarea.style.overflowY = 'hidden';
+        if (textarea.scrollHeight > MAX_HEIGHT) {
+            textarea.style.overflowY = 'auto';
+        } else {
+            textarea.style.overflowY = 'hidden';
+        }
         sendBtn.disabled = !textarea.value.trim();
     }
 
@@ -36,15 +40,23 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     
     // --- BACKEND COMMUNICATION (Queue Pattern) ---
+    
     async function submitTask(payload) {
         const taskName = payload.text ? `Text: ${payload.text.substring(0, 15)}...` : "Audio Message";
         showLoading(taskName);
 
         try {
+            // 🔥 FIX: Send to the correct unified endpoint
             await fetch('/api/submit_task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...payload, client_id: CLIENT_ID, session_id: sessionId, task_name: taskName, persona: "victim" })
+                body: JSON.stringify({ 
+                    ...payload, 
+                    client_id: CLIENT_ID, 
+                    session_id: sessionId, 
+                    task_name: taskName, 
+                    persona: "victim" 
+                })
             });
         } catch (error) {
             hideLoading();
@@ -59,7 +71,9 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.results && data.results.length > 0) {
                 hideLoading();
                 data.results.forEach(result => {
-                    addBubble(result.output, 'ai');
+                    if (result.persona === 'victim') {
+                        addBubble(result.output, 'ai');
+                    }
                 });
             }
         } catch (e) {
@@ -88,6 +102,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     
     // --- Event Handlers ---
+
     function handleSendText() {
         const text = textarea.value.trim();
         if (!text) return;
@@ -99,11 +114,16 @@ document.addEventListener("DOMContentLoaded", () => {
     let mediaRecorder, audioChunks = [];
     async function handleToggleMic() {
         isListening = !isListening;
+
+        // 🔥 FIX: Correctly toggle classes for 2-state button
         micBtn.classList.toggle('listening', isListening);
-        micIcon.classList.toggle('hidden', !isListening);
-        stopIcon.classList.toggle('hidden', isListening);
+        micIcon.classList.toggle('hidden', isListening);
+        micIcon.classList.toggle('block', !isListening);
+        stopIcon.classList.toggle('hidden', !isListening);
+        stopIcon.classList.toggle('block', isListening);
         
         if (isListening) {
+            // START RECORDING
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream);
@@ -119,9 +139,16 @@ document.addEventListener("DOMContentLoaded", () => {
                     };
                 };
                 mediaRecorder.start();
-            } catch (err) { console.error(err); isListening = false; }
+            } catch (err) { 
+                console.error("Microphone access denied:", err);
+                isListening = false; // Reset state on error
+                handleToggleMic(); // Revert UI
+            }
         } else {
-            if (mediaRecorder) mediaRecorder.stop();
+            // STOP RECORDING
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
         }
     }
 
