@@ -14,7 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // --- STATE ---
     const CLIENT_ID = 'sup_' + Math.random().toString(36).substring(2, 9);
-    let currentRestockItem = ""; // To track which item the modal is for
+    let currentRestockItem = "";
 
     // --- API & DATA HANDLING ---
     async function submitTask(payload) {
@@ -127,16 +127,19 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("cancelRestock").addEventListener("click", () => restockModal.classList.add("hidden"));
     document.getElementById("cancelAddItem").addEventListener("click", () => addItemModal.classList.add("hidden"));
 
-    // 🔥 FIX: Correctly read values and call submitTask
+    // Submit Modals
     document.getElementById("confirmRestock").addEventListener("click", () => {
         const qtyInput = document.getElementById("restockQtyInput");
         const qty = qtyInput.value;
         if (qty && currentRestockItem) {
             const taskName = `Restocking ${currentRestockItem}`;
-            const command = `Add ${qty} units to inventory for item '${currentRestockItem}'`;
-            submitTask({ command: command, task_name: taskName });
+            // 🔥 FIX: Use "text" key to send command
+            submitTask({ 
+                text: `Add ${qty} units to inventory for item '${currentRestockItem}'`, 
+                task_name: taskName 
+            });
             restockModal.classList.add("hidden");
-            qtyInput.value = ""; // Clear for next time
+            qtyInput.value = "";
         }
     });
     document.getElementById("confirmAddItem").addEventListener("click", () => {
@@ -146,8 +149,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const qty = qtyInput.value;
         if (name && qty) {
             const taskName = `Adding ${name}`;
-            const command = `Add new item '${name}' with ${qty} units`;
-            submitTask({ command: command, task_name: taskName });
+            // 🔥 FIX: Use "text" key to send command
+            submitTask({ 
+                text: `Add new item '${name}' with ${qty} units`, 
+                task_name: taskName 
+            });
             addItemModal.classList.add("hidden");
             nameInput.value = "";
             qtyInput.value = "";
@@ -161,7 +167,8 @@ document.addEventListener("DOMContentLoaded", () => {
     commandSendBtn.addEventListener("click", () => {
         if (commandInput.value) {
             const taskName = `Command: ${commandInput.value.substring(0, 25)}...`;
-            submitTask({ command: commandInput.value, task_name: taskName });
+            // 🔥 FIX: Use "text" key to send command
+            submitTask({ text: commandInput.value, task_name: taskName });
             commandInput.value = "";
         }
     });
@@ -175,10 +182,12 @@ document.addEventListener("DOMContentLoaded", () => {
         const id = e.target.dataset.id;
         if (!id) return;
         if (e.target.classList.contains("approve-btn")) {
-            submitTask({ command: `Approve request ID ${id}`, task_name: `Approving Req ${id}` });
+            // 🔥 FIX: Use "text" key to send command
+            submitTask({ text: `Approve request ID ${id}`, task_name: `Approving Req ${id}` });
         }
         if (e.target.classList.contains("reject-btn")) {
-            submitTask({ command: `Reject request ID ${id}`, task_name: `Rejecting Req ${id}` });
+            // 🔥 FIX: Use "text" key to send command
+            submitTask({ text: `Reject request ID ${id}`, task_name: `Rejecting Req ${id}` });
         }
     });
 
