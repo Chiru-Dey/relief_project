@@ -12,24 +12,37 @@ document.addEventListener("DOMContentLoaded", () => {
     const addItemModal = document.getElementById("addItemModal");
     const addItemBtn = document.getElementById("addItemBtn");
     
-    let currentRestockItem = "";
+    // --- STATE ---
+    const CLIENT_ID = 'sup_' + Math.random().toString(36).substring(2, 9);
+    let currentRestockItem = ""; // To track which item the modal is for
 
     // --- API & DATA HANDLING ---
-
-    async function runCommand(command, taskName) {
-        log(`⏳ Queued: ${taskName}`);
+    async function submitTask(payload) {
+        log(`⏳ Queued: ${payload.task_name}`);
         try {
-            const response = await fetch("/api/supervisor_command", {
+            await fetch("/api/submit_task", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ command }),
+                body: JSON.stringify({ ...payload, client_id: CLIENT_ID, persona: "supervisor" }),
             });
-            const data = await response.json();
-            log(`✅ ${taskName}: ${data.reply}`);
         } catch (e) {
-            log(`❌ Command Error: ${e}`);
+            log(`❌ Network Error on Submit: ${e}`);
         }
-        fetchData(); // Refresh all data after every action
+    }
+    
+    async function pollResults() {
+        try {
+            const res = await fetch(`/api/get_results/${CLIENT_ID}`);
+            const data = await res.json();
+            if (data.results && data.results.length > 0) {
+                data.results.forEach(result => {
+                    log(`✅ ${result.task_name}: ${result.output}`);
+                });
+                fetchData(); // Refresh all data after a result comes in
+            }
+        } catch (e) {
+            console.error("Polling error", e);
+        }
     }
 
     async function fetchData() {
@@ -47,10 +60,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // --- RENDER LOGIC ---
-
+    // --- RENDER FUNCTIONS ---
     function renderInventory(items) {
-        inventoryList.innerHTML = ""; // Clear list before re-rendering
+        inventoryList.innerHTML = "";
         if (!items || items.length === 0) {
             inventoryList.innerHTML = "<p>No inventory found.</p>";
             return;
@@ -96,13 +108,12 @@ document.addEventListener("DOMContentLoaded", () => {
     function log(message) {
         const p = document.createElement("p");
         p.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-        // Prepend to show new logs at the top and keep view scrolled there
         logContainer.prepend(p);
     }
 
     // --- MODAL HANDLING ---
-
-    // Show
+    
+    // Show Modals
     inventoryList.addEventListener("click", e => {
         if (e.target.classList.contains("restock-btn")) {
             currentRestockItem = e.target.dataset.item;
@@ -112,18 +123,20 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     addItemBtn.addEventListener("click", () => addItemModal.classList.remove("hidden"));
 
-    // Hide
+    // Hide Modals
     document.getElementById("cancelRestock").addEventListener("click", () => restockModal.classList.add("hidden"));
     document.getElementById("cancelAddItem").addEventListener("click", () => addItemModal.classList.add("hidden"));
 
-    // Submit
+    // 🔥 FIX: Correctly read values and call submitTask
     document.getElementById("confirmRestock").addEventListener("click", () => {
         const qtyInput = document.getElementById("restockQtyInput");
         const qty = qtyInput.value;
         if (qty && currentRestockItem) {
-            runCommand(`Add ${qty} units to inventory for item '${currentRestockItem}'`, `Restocking ${currentRestockItem}`);
+            const taskName = `Restocking ${currentRestockItem}`;
+            const command = `Add ${qty} units to inventory for item '${currentRestockItem}'`;
+            submitTask({ command: command, task_name: taskName });
             restockModal.classList.add("hidden");
-            qtyInput.value = "";
+            qtyInput.value = ""; // Clear for next time
         }
     });
     document.getElementById("confirmAddItem").addEventListener("click", () => {
@@ -132,7 +145,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const name = nameInput.value;
         const qty = qtyInput.value;
         if (name && qty) {
-            runCommand(`Add new item '${name}' with ${qty} units`, `Adding ${name}`);
+            const taskName = `Adding ${name}`;
+            const command = `Add new item '${name}' with ${qty} units`;
+            submitTask({ command: command, task_name: taskName });
             addItemModal.classList.add("hidden");
             nameInput.value = "";
             qtyInput.value = "";
@@ -141,13 +156,12 @@ document.addEventListener("DOMContentLoaded", () => {
     
     // --- EVENT LISTENERS ---
     
-    // Refresh Button
     refreshBtn.addEventListener("click", fetchData);
     
-    // Command Center
     commandSendBtn.addEventListener("click", () => {
         if (commandInput.value) {
-            runCommand(commandInput.value, `Command: ${commandInput.value.substring(0, 25)}...`);
+            const taskName = `Command: ${commandInput.value.substring(0, 25)}...`;
+            submitTask({ command: commandInput.value, task_name: taskName });
             commandInput.value = "";
         }
     });
@@ -157,20 +171,18 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // Action Buttons on Request Items
     requestList.addEventListener("click", e => {
         const id = e.target.dataset.id;
         if (!id) return;
-
         if (e.target.classList.contains("approve-btn")) {
-            runCommand(`Approve request ID ${id}`, `Approving Req ${id}`);
+            submitTask({ command: `Approve request ID ${id}`, task_name: `Approving Req ${id}` });
         }
         if (e.target.classList.contains("reject-btn")) {
-            runCommand(`Reject request ID ${id}`, `Rejecting Req ${id}`);
+            submitTask({ command: `Reject request ID ${id}`, task_name: `Rejecting Req ${id}` });
         }
     });
 
     // --- INITIAL LOAD & POLLING ---
     fetchData();
-    setInterval(fetchData, 5000); // Auto-refresh data every 5 seconds
+    setInterval(pollResults, 1000);
 });

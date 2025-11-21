@@ -11,6 +11,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- State ---
     let isListening = false;
+    // Generate a unique ID for this browser tab session
+    const CLIENT_ID = 'vic_' + Math.random().toString(36).substring(2, 9);
     let sessionId = 'session_' + Date.now();
 
     // --- Functions ---
@@ -27,35 +29,61 @@ document.addEventListener("DOMContentLoaded", () => {
         wrapper.className = `message-wrapper ${sender}`;
         const bubble = document.createElement('div');
         bubble.className = `message-bubble ${sender}`;
-        bubble.innerHTML = text.replace(/\n/g, '<br>'); // Handles newlines in markdown
+        bubble.innerHTML = text.replace(/\n/g, '<br>');
         wrapper.appendChild(bubble);
         messagesContent.appendChild(wrapper);
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
     
-    // --- BACKEND COMMUNICATION ---
-    async function callBackend(payload) {
-        const loadingId = 'loading-' + Date.now();
+    // --- BACKEND COMMUNICATION (Queue Pattern) ---
+    async function submitTask(payload) {
+        const taskName = payload.text ? `Text: ${payload.text.substring(0, 15)}...` : "Audio Message";
+        showLoading(taskName);
+
+        try {
+            await fetch('/api/submit_task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...payload, client_id: CLIENT_ID, session_id: sessionId, task_name: taskName, persona: "victim" })
+            });
+        } catch (error) {
+            hideLoading();
+            addBubble("Error: Could not submit task to the agent backend.", 'ai');
+        }
+    }
+    
+    async function pollResults() {
+        try {
+            const res = await fetch(`/api/get_results/${CLIENT_ID}`);
+            const data = await res.json();
+            if (data.results && data.results.length > 0) {
+                hideLoading();
+                data.results.forEach(result => {
+                    addBubble(result.output, 'ai');
+                });
+            }
+        } catch (e) {
+            console.error("Polling error:", e);
+        }
+    }
+
+    let loadingDivId = null;
+    function showLoading(taskName) {
+        hideLoading(); // Clear any old loaders
+        loadingDivId = 'loading-' + Date.now();
         const loader = document.createElement('div');
-        loader.id = loadingId;
+        loader.id = loadingDivId;
         loader.className = 'message-wrapper ai';
         loader.innerHTML = '<div class="message-bubble ai" style="color:#A8C7FA">Thinking...</div>';
         messagesContent.appendChild(loader);
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
-
-        try {
-            // Sends to the Flask API endpoint defined in frontend_app.py
-            const response = await fetch('/api/victim_chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...payload, session_id: sessionId })
-            });
-            const data = await response.json();
-            document.getElementById(loadingId).remove();
-            addBubble(data.reply, 'ai');
-        } catch (error) {
-            document.getElementById(loadingId).remove();
-            addBubble("Error: Could not connect to the agent backend.", 'ai');
+    }
+    
+    function hideLoading() {
+        if(loadingDivId) {
+            const loader = document.getElementById(loadingDivId);
+            if(loader) loader.remove();
+            loadingDivId = null;
         }
     }
     
@@ -65,7 +93,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!text) return;
         addBubble(text, 'user');
         textarea.value = ''; autoResize();
-        callBackend({ text: text });
+        submitTask({ text: text });
     }
     
     let mediaRecorder, audioChunks = [];
@@ -87,7 +115,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     reader.readAsDataURL(audioBlob);
                     reader.onloadend = () => {
                         addBubble("🎤 [Audio Sent]", "user");
-                        callBackend({ audio: reader.result });
+                        submitTask({ audio: reader.result });
                     };
                 };
                 mediaRecorder.start();
@@ -106,4 +134,5 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- Init ---
     addBubble("Hello! How can I help you today?", "ai");
     autoResize();
+    setInterval(pollResults, 1000); // Start polling for results
 });

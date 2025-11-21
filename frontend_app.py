@@ -22,26 +22,23 @@ app = Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), "relief_logistics.db")
 
 # --- GLOBAL QUEUE & STORAGE ---
-# UI (Producer) -> Queue -> Worker (Consumer)
 TASK_QUEUE = queue.Queue()
-# Worker (Producer) -> Results -> UI (Consumer)
 JOB_RESULTS = {}
 
-# --- GLOBAL ADK AGENTS (Initialized in main thread) ---
+# --- GLOBAL ADK AGENTS ---
 VICTIM_RUNNER = None
 SUPERVISOR_RUNNER = None
 
 def initialize_adk_agents():
-    """Initializes ADK Runners. Called once at startup in the main thread."""
+    """Initializes ADK Runners. Called once at startup."""
     global VICTIM_RUNNER, SUPERVISOR_RUNNER
     
     if "GOOGLE_API_KEY" not in os.environ:
         raise ValueError("GOOGLE_API_KEY not found.")
 
     retry_config = types.HttpRetryOptions(attempts=3)
-    session_service = InMemorySessionService() # Shared by both runners
+    session_service = InMemorySessionService()
 
-    # Create separate proxy instances
     proxy_vic = RemoteA2aAgent(name="relief_manager", description="Hub", agent_card=f"http://localhost:8001{AGENT_CARD_WELL_KNOWN_PATH}")
     proxy_sup = RemoteA2aAgent(name="relief_manager", description="Hub", agent_card=f"http://localhost:8001{AGENT_CARD_WELL_KNOWN_PATH}")
 
@@ -49,7 +46,7 @@ def initialize_adk_agents():
 
     victim_agent = LlmAgent(
         model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
-        name="victim_support_flask",
+        name="victim_support",
         instruction=f"Victim Support. Items: [{valid_items}]. Delegate to 'relief_manager'.",
         sub_agents=[proxy_vic]
     )
@@ -57,7 +54,7 @@ def initialize_adk_agents():
     
     supervisor_agent = LlmAgent(
         model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
-        name="supervisor_flask",
+        name="supervisor",
         instruction=f"Supervisor. Items: [{valid_items}]. Delegate to 'relief_manager'. Use BATCH tools.",
         sub_agents=[proxy_sup]
     )
@@ -67,16 +64,11 @@ def initialize_adk_agents():
 # --- BACKGROUND WORKER THREAD ---
 
 def agent_worker():
-    """
-    A single, long-running thread that consumes jobs from TASK_QUEUE.
-    It has its own dedicated asyncio event loop.
-    """
-    # Create the ONE event loop for this thread
+    """A single, long-running thread that consumes jobs from TASK_QUEUE."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
     async def run_task(job):
-        """Helper to run a single job's async logic."""
         runner = SUPERVISOR_RUNNER if job["persona"] == "supervisor" else VICTIM_RUNNER
         session_id = job.get("session_id", "default_session")
         
@@ -84,10 +76,12 @@ def agent_worker():
         if "text" in job:
             user_message = types.Content(role="user", parts=[types.Part(text=job["text"])])
         elif "audio" in job:
-            # Decode audio inside the worker
-            header, encoded = job["audio"].split(",", 1)
-            audio_bytes = base64.b64decode(encoded)
-            user_message = types.Content(role="user", parts=[types.Part(inline_data=types.Blob(mime_type="audio/webm", data=audio_bytes))])
+            try:
+                header, encoded = job["audio"].split(",", 1)
+                audio_bytes = base64.b64decode(encoded)
+                user_message = types.Content(role="user", parts=[types.Part(inline_data=types.Blob(mime_type="audio/webm", data=audio_bytes))])
+            except Exception as e:
+                return f"Audio Decode Error: {e}"
 
         if not user_message: return "No message content"
 
@@ -107,18 +101,14 @@ def agent_worker():
 
     print("🤖 Agent Worker thread started.")
     while True:
-        # Block until a job is available
         job = TASK_QUEUE.get()
-        if job is None: break # Shutdown signal
+        if job is None: break
         
         client_id = job["client_id"]
-        
-        # Run the async logic in this thread's event loop
         result_text = loop.run_until_complete(run_task(job))
 
-        # Store result for the UI to poll
         if client_id not in JOB_RESULTS: JOB_RESULTS[client_id] = []
-        JOB_RESULTS[client_id].append({"task_name": job["task_name"], "output": result_text})
+        JOB_RESULTS[client_id].append({"task_name": job["task_name"], "output": result_text, "persona": job["persona"]})
 
 # --- FLASK ROUTES ---
 
@@ -130,18 +120,17 @@ def victim_chat():
 def supervisor_dashboard():
     return render_template("supervisor_dashboard.html")
 
+# 🔥 UNIFIED API ENDPOINT
 @app.route("/api/submit_task", methods=["POST"])
 def submit_task():
-    """
-    UI endpoint. Instantly puts a job on the queue.
-    """
+    """A single endpoint for all UI actions."""
     data = request.json
     TASK_QUEUE.put(data)
     return jsonify({"status": "queued"})
 
 @app.route("/api/get_results/<client_id>", methods=["GET"])
 def get_results(client_id):
-    """Poller endpoint. Returns finished jobs for a specific client."""
+    """The poller endpoint for both UIs."""
     results = JOB_RESULTS.pop(client_id, [])
     return jsonify({"results": results})
 
@@ -160,10 +149,6 @@ def get_supervisor_data():
 # --- MAIN EXECUTION ---
 if __name__ == "__main__":
     initialize_adk_agents()
-    
-    # Start the single background worker thread
     worker_thread = threading.Thread(target=agent_worker, daemon=True)
     worker_thread.start()
-    
-    # use_reloader=False is CRITICAL for this pattern to work
     app.run(port=5000, debug=True, use_reloader=False)
