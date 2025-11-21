@@ -2,146 +2,147 @@ import reflex as rx
 from ..state import State
 
 def supervisor_ui():
-    return rx.box(
-        # GLOBAL QUEUE INDICATOR
-        rx.cond(
-            State.is_working,
-            rx.hstack(
-                rx.spinner(size="2", color_scheme="blue"),
-                rx.text(State.current_task_name, weight="bold", color="blue.600", size="2"),
-                bg="white", padding="3", border_radius="full", box_shadow="lg", border="1px solid #e2e8f0",
-                position="fixed", top="20px", right="20px", z_index="9999"
-            )
-        ),
-
-        rx.heading("👮 Relief Operations Dashboard", size="8", margin_bottom="4"),
+    return rx.fragment(
+        # POLL for updates
+        rx.moment(interval=1000, on_change=State.check_job_results, display="none"),
         
-        # METRICS
-        rx.flex(
-            rx.card(
-                rx.vstack(
-                    rx.text("Total Inventory Items", size="2", weight="medium", color="gray"),
-                    rx.heading(rx.cond(State.inventory, State.inventory.length(), 0), size="7"),
-                    spacing="2"
-                ), width="30%"
-            ),
-            rx.card(
-                rx.vstack(
-                    rx.text("Pending Approvals", size="2", weight="medium", color="gray"),
-                    rx.heading(rx.cond(State.requests, State.requests.length(), 0), size="7", color_scheme="red"),
-                    spacing="2"
-                ), width="30%"
-            ),
-            rx.button("🔄 Refresh", on_click=State.refresh_dashboard_data, size="4", margin_top="2"),
-            spacing="4", width="100%", margin_bottom="6"
-        ),
-
-        rx.grid(
-            # INVENTORY
-            rx.box(
+        rx.box(
+            # GLOBAL QUEUE INDICATOR
+            rx.cond(
+                State.is_working,
                 rx.hstack(
-                    rx.heading("📦 Inventory", size="5"),
-                    rx.button("➕ Add Item", on_click=lambda: State.set_is_add_modal_open(True)),
-                    justify="between", margin_bottom="2"
-                ),
-                rx.foreach(
-                    State.inventory,
-                    lambda item: rx.card(
-                        rx.hstack(
-                            rx.text(item["item_name"], weight="bold", size="4"),
-                            rx.spacer(),
-                            rx.badge(f"{item['quantity']} units", color_scheme="blue", size="3"),
-                            rx.button("Restock", size="1", on_click=lambda: State.open_restock_modal(item["item_name"]))
-                        ), margin_bottom="2"
-                    )
-                ),
-            ),
-            
-            # REQUESTS
-            rx.box(
-                rx.heading("🚨 Request Queue", size="5", margin_bottom="2"),
-                rx.cond(
-                    State.requests.length() == 0,
-                    rx.text("No pending requests.", color="gray"),
-                    rx.foreach(
-                        State.requests,
-                        lambda req: rx.card(
-                            rx.vstack(
-                                rx.hstack(
-                                    rx.badge(f"ID {req['id']}"),
-                                    rx.badge(req['urgency'], color_scheme=rx.cond(req['urgency'] == 'CRITICAL', "red", "gray")),
-                                    rx.text(f"{req['quantity']}x {req['item_name']}", weight="bold"),
-                                ),
-                                rx.text(f"Loc: {req['location']}", size="2"),
-                                rx.hstack(
-                                    rx.button("✅ Approve", color_scheme="green", on_click=lambda: State.approve_request(req["id"])),
-                                    rx.button("❌ Reject", color_scheme="red", on_click=lambda: State.reject_request(req["id"])),
-                                    spacing="2", margin_top="2"
-                                ), align="start"
-                            ), margin_bottom="2"
-                        )
-                    )
+                    rx.spinner(size="2", color_scheme="blue"),
+                    rx.text(State.current_task_name, weight="bold", color="blue.600", size="2"),
+                    bg="white", padding="3", border_radius="full", box_shadow="lg", border="1px solid #e2e8f0",
+                    position="fixed", top="20px", right="20px", z_index="9999"
                 )
             ),
-            columns="2", spacing="6"
-        ),
 
-        rx.divider(margin_y="4"),
-
-        # COMMAND CENTER
-        rx.box(
-            rx.heading("💬 Command Center", size="5", margin_bottom="2"),
-            rx.hstack(
-                rx.input(
-                    placeholder="E.g. 'Restock water_bottles by adding 500'",
-                    value=State.supervisor_input,
-                    on_change=State.set_supervisor_input,
-                    on_key_down=lambda e: rx.cond(e == "Enter", State.submit_supervisor_query(), None),
-                    width="100%"
+            rx.heading("👮 Relief Operations Dashboard", size="8", margin_bottom="4"),
+            
+            # METRICS
+            rx.flex(
+                rx.card(
+                    rx.vstack(
+                        rx.text("Total Inventory Items", size="2", weight="medium", color="gray"),
+                        rx.heading(rx.cond(State.inventory, State.inventory.length(), 0), size="7"),
+                        spacing="2"
+                    ), width="30%"
                 ),
-                rx.button(rx.icon("send"), on_click=State.submit_supervisor_query, color_scheme="blue"),
-            ),
-            margin_bottom="4"
-        ),
-
-        # LOGS
-        rx.text("Agent Activity Log", weight="bold"),
-        rx.scroll_area(
-            rx.vstack(rx.foreach(State.logs, lambda log: rx.text(log, font_family="monospace", size="1"))),
-            height="200px", bg="gray.50", padding="2", border_radius="md"
-        ),
-
-        # MODALS
-        rx.dialog.root(
-            rx.dialog.content(
-                rx.dialog.title("Restock Item"),
-                rx.text(f"Adding stock to: {State.selected_item_for_restock}"),
-                rx.input(placeholder="Amount to Add", on_change=State.set_restock_qty, type="number"),
-                rx.flex(
-                    rx.dialog.close(rx.button("Cancel", color_scheme="gray")),
-                    rx.dialog.close(rx.button("Add Stock", on_click=State.submit_restock)),
-                    spacing="3", margin_top="4", justify="end",
+                rx.card(
+                    rx.vstack(
+                        rx.text("Pending Approvals", size="2", weight="medium", color="gray"),
+                        rx.heading(rx.cond(State.requests, State.requests.length(), 0), size="7", color_scheme="red"),
+                        spacing="2"
+                    ), width="30%"
                 ),
+                rx.button("🔄 Refresh", on_click=State.refresh_dashboard_data, size="4", margin_top="2"),
+                spacing="4", width="100%", margin_bottom="6"
             ),
-            open=State.is_restock_modal_open,
-            on_open_change=State.set_is_restock_modal_open,
-        ),
 
-        rx.dialog.root(
-            rx.dialog.content(
-                rx.dialog.title("Add New Item"),
-                rx.input(placeholder="Item Name", on_change=State.set_new_item_name),
-                rx.input(placeholder="Initial Quantity", on_change=State.set_new_item_qty, type="number", margin_top="2"),
-                rx.flex(
-                    rx.dialog.close(rx.button("Cancel", color_scheme="gray")),
-                    rx.dialog.close(rx.button("Create", on_click=State.submit_add_item)),
-                    spacing="3", margin_top="4", justify="end",
+            # GRID
+            rx.grid(
+                rx.box(
+                    rx.hstack(
+                        rx.heading("📦 Inventory", size="5"),
+                        rx.button("➕ Add Item", on_click=lambda: State.set_is_add_modal_open(True)),
+                        justify="between", margin_bottom="2"
+                    ),
+                    rx.foreach(
+                        State.inventory,
+                        lambda item: rx.card(
+                            rx.hstack(
+                                rx.text(item["item_name"], weight="bold", size="4"),
+                                rx.spacer(),
+                                rx.badge(f"{item['quantity']} units", color_scheme="blue", size="3"),
+                                rx.button("Restock", size="1", on_click=lambda: State.open_restock_modal(item["item_name"]))
+                            ), margin_bottom="2"
+                        )
+                    ),
                 ),
+                rx.box(
+                    rx.heading("🚨 Request Queue", size="5", margin_bottom="2"),
+                    rx.cond(
+                        State.requests.length() == 0,
+                        rx.text("No pending requests.", color="gray"),
+                        rx.foreach(
+                            State.requests,
+                            lambda req: rx.card(
+                                rx.vstack(
+                                    rx.hstack(
+                                        rx.badge(f"ID {req['id']}"),
+                                        rx.badge(req['urgency'], color_scheme=rx.cond(req['urgency'] == 'CRITICAL', "red", "gray")),
+                                        rx.text(f"{req['quantity']}x {req['item_name']}", weight="bold"),
+                                    ),
+                                    rx.text(f"Loc: {req['location']}", size="2"),
+                                    rx.hstack(
+                                        rx.button("✅ Approve", color_scheme="green", on_click=lambda: State.approve_request(req["id"])),
+                                        rx.button("❌ Reject", color_scheme="red", on_click=lambda: State.reject_request(req["id"])),
+                                        spacing="2", margin_top="2"
+                                    ), align="start"
+                                ), margin_bottom="2"
+                            )
+                        )
+                    )
+                ),
+                columns="2", spacing="6"
             ),
-            open=State.is_add_modal_open,
-            on_open_change=State.set_is_add_modal_open,
-        ),
-        
-        padding="6",
-        on_mount=State.refresh_dashboard_data
+
+            rx.divider(margin_y="4"),
+
+            # COMMAND CENTER
+            rx.box(
+                rx.heading("💬 Command Center", size="5", margin_bottom="2"),
+                rx.hstack(
+                    rx.input(
+                        placeholder="E.g. 'Restock water_bottles by adding 500'",
+                        value=State.supervisor_input,
+                        on_change=State.set_supervisor_input,
+                        on_key_down=lambda e: rx.cond(e == "Enter", State.submit_supervisor_query(), None),
+                        width="100%"
+                    ),
+                    rx.button(rx.icon("send"), on_click=State.submit_supervisor_query, color_scheme="blue"),
+                ),
+                margin_bottom="4"
+            ),
+
+            # LOGS
+            rx.text("Agent Activity Log", weight="bold"),
+            rx.scroll_area(
+                rx.vstack(rx.foreach(State.logs, lambda log: rx.text(log, font_family="monospace", size="1"))),
+                height="200px", bg="gray.50", padding="2", border_radius="md"
+            ),
+
+            # MODALS
+            rx.dialog.root(
+                rx.dialog.content(
+                    rx.dialog.title("Restock Item"),
+                    rx.text(f"Adding stock to: {State.selected_item_for_restock}"),
+                    rx.input(placeholder="Amount to Add", on_change=State.set_restock_qty, type="number"),
+                    rx.flex(
+                        rx.dialog.close(rx.button("Cancel", color_scheme="gray")),
+                        rx.dialog.close(rx.button("Add Stock", on_click=State.submit_restock)),
+                        spacing="3", margin_top="4", justify="end",
+                    ),
+                ),
+                open=State.is_restock_modal_open,
+                on_open_change=State.set_is_restock_modal_open,
+            ),
+            rx.dialog.root(
+                rx.dialog.content(
+                    rx.dialog.title("Add New Item"),
+                    rx.input(placeholder="Item Name", on_change=State.set_new_item_name),
+                    rx.input(placeholder="Initial Quantity", on_change=State.set_new_item_qty, type="number", margin_top="2"),
+                    rx.flex(
+                        rx.dialog.close(rx.button("Cancel", color_scheme="gray")),
+                        rx.dialog.close(rx.button("Create", on_click=State.submit_add_item)),
+                        spacing="3", margin_top="4", justify="end",
+                    ),
+                ),
+                open=State.is_add_modal_open,
+                on_open_change=State.set_is_add_modal_open,
+            ),
+            padding="6",
+            on_mount=State.refresh_dashboard_data
+        )
     )
