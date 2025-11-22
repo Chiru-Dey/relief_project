@@ -1,67 +1,73 @@
-from google.adk.agents import LlmAgent
+from google.adk.agents import Agent # <--- CHANGED
 from google.adk.tools import AgentTool
 from google.adk.models.google_llm import Gemini
 from google.genai import types
-import tools_client # Server-side tool import
+import tools_client
 
-retry_config = types.HttpRetryOptions(attempts=3)
-# The Server has access to the database to fetch valid items
+# --- SETUP ---
+retry_config = types.HttpRetryOptions(attempts=5)
 VALID_ITEMS_STR = ", ".join(tools_client.database.get_all_item_names())
 
-# --- WORKER 1: THE STRATEGIST (Planner) ---
-strategist_agent = LlmAgent(
+# --- TIER 3: VICTIM WORKER AGENTS ---
+
+strategist_agent = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="strategist_agent",
-    instruction=f"""
-    You are the Disaster Relief Strategist.
-    VALID INVENTORY: [{VALID_ITEMS_STR}]
-    
-    Your Job:
-    1. Analyze the situation (e.g. "10 injured").
-    2. Create a plan using ONLY valid inventory items.
-    3. If items are missing (e.g. "bandages"), suggest valid alternatives (e.g. "medical_kits").
-    4. Output a clear list of actions for the dispatcher.
-    """
+    instruction=f"You are a strategist. Given a situation (e.g., '10 people injured'), create a dispatch plan using items from this list: [{VALID_ITEMS_STR}]. Suggest alternatives for invalid items."
 )
 
-# --- WORKER 2: THE ESCALATOR (Alerts) ---
-escalation_agent = LlmAgent(
+escalation_agent = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="escalation_agent",
-    instruction="Call `log_inventory_gap` when a user requests an item we do not carry (e.g. 'ambulance').",
+    instruction="Your only job is to call the `log_inventory_gap` tool to report a missing item that a user requested.",
     tools=[tools_client.log_inventory_gap]
 )
 
-# --- WORKER 3: THE DISPATCHER (Doer) ---
-request_dispatcher_agent = LlmAgent(
+request_dispatcher_agent = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="request_dispatcher_agent",
-    instruction="Call `request_relief` for specific items and quantities as directed.",
+    instruction="Your only job is to call the `request_relief` tool for a single, valid inventory item with the exact parameters you receive.",
     tools=[tools_client.request_relief]
 )
 
-# --- THE ORCHESTRATOR (Manager of this Domain) ---
-victim_orchestrator = LlmAgent(
+# --- SPECIALIST: ITEM FINDER ---
+item_finder_agent = Agent(
+    model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
+    name="item_finder_agent",
+    instruction=f"""
+    You are a database key finder. Your only job is to find the best match for a user's requested item from a predefined list.
+    VALID INVENTORY KEYS: [{VALID_ITEMS_STR}]
+
+    - Read the user's item request (e.g., "med kits", "water").
+    - Find the closest matching key from the VALID INVENTORY KEYS list.
+    - Your output MUST BE ONLY the single, exact, official key (e.g., `medical_kits`, `water_bottles`).
+    - If no reasonable match can be found, you MUST respond with the word "None".
+    """
+)
+
+# --- TIER 2: VICTIM ORCHESTRATOR ---
+victim_orchestrator = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="victim_orchestrator",
     instruction=f"""
-    You are an orchestrator for victim requests.
-    VALID INVENTORY: [{VALID_ITEMS_STR}]
+    You are the orchestrator for victim requests. You MUST follow this workflow:
 
-    1.  **Analyze:**
-        - Use `strategist_agent` for complex plans (e.g. "we are injured").
-        - Use `escalation_agent` for invalid items.
-    2.  **Execute:** 
-        - Use `request_dispatcher_agent` to dispatch valid items.
-    3.  **CONFIRMATION (CRITICAL):** 
-        - Do NOT say "I have initiated a plan".
-        - You MUST report the exact result of the dispatch. 
-        - Example: "Confirmed. I have dispatched 10 medical_kits to Sector 9 (Request ID 55). I have also dispatched 20 blankets."
-        - If the tool returns a Request ID, you MUST share it with the user.
+    1.  **Analyze Request:** 
+        - If situational (e.g., "we are injured"), delegate to `strategist_agent`.
+        - If asking for a specific item, proceed to step 2.
+
+    2.  **Find Item Key:** For EACH item requested, call `item_finder_agent` to get the official database key.
+
+    3.  **Validate & Execute:**
+        - If `item_finder_agent` returns a valid key (e.g., `medical_kits`), delegate to `request_dispatcher_agent` with that key.
+        - If it returns "None" (e.g., for "ambulance"), delegate to `escalation_agent`.
+
+    4.  **Summarize:** Provide a final summary of what was dispatched.
     """,
     tools=[
         AgentTool(agent=strategist_agent),
         AgentTool(agent=escalation_agent),
-        AgentTool(agent=request_dispatcher_agent)
+        AgentTool(agent=request_dispatcher_agent),
+        AgentTool(agent=item_finder_agent)
     ]
 )

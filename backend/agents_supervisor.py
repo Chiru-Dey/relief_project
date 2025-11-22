@@ -1,16 +1,18 @@
-from google.adk.agents import LlmAgent
+from google.adk.agents import Agent # <--- CHANGED
 from google.adk.tools import AgentTool
 from google.adk.models.google_llm import Gemini
 from google.genai import types
 import tools_supervisor
 
-retry_config = types.HttpRetryOptions(attempts=3)
+# --- SETUP ---
+retry_config = types.HttpRetryOptions(attempts=5)
 
-# --- WORKER 1: INVENTORY MANAGER ---
-inventory_manager_agent = LlmAgent(
+# --- TIER 3: SUPERVISOR WORKER AGENTS ---
+
+inventory_manager_agent = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="inventory_manager_agent",
-    instruction="Manage inventory database (Add, Delete, Restock, View).",
+    instruction="You manage inventory. Use your tools to add, delete, restock, or view items.",
     tools=[
         tools_supervisor.admin_add_new_item,
         tools_supervisor.admin_delete_item,
@@ -21,11 +23,10 @@ inventory_manager_agent = LlmAgent(
     ]
 )
 
-# --- WORKER 2: APPROVAL MANAGER ---
-approval_agent = LlmAgent(
+approval_agent = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="approval_agent",
-    instruction="Handle request queue (View pending, Approve, Reject, Audit).",
+    instruction="You handle approvals. Use your tools to view pending requests, approve/reject them, or view the audit log.",
     tools=[
         tools_supervisor.supervisor_view_pending_requests,
         tools_supervisor.supervisor_decide_request,
@@ -35,22 +36,24 @@ approval_agent = LlmAgent(
     ]
 )
 
-# --- WORKER 3: ACTION STRATEGIST ---
-action_item_strategist = LlmAgent(
+action_item_strategist = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="action_item_strategist",
-    instruction="Analyze 'ACTION_REQUIRED' alerts and suggest the correct admin command to resolve them."
+    instruction="""
+    You analyze ACTION_REQUIRED tasks and create a plan for the supervisor.
+    Read the task notes and suggest the next logical step.
+    """
 )
 
-# --- THE ORCHESTRATOR ---
-supervisor_orchestrator = LlmAgent(
+# --- TIER 2: SUPERVISOR ORCHESTRATOR ---
+supervisor_orchestrator = Agent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="supervisor_orchestrator",
     instruction="""
-    You manage all Supervisor Commands. Delegate to your team:
-    - Inventory tasks -> `inventory_manager_agent`
-    - Approval tasks -> `approval_agent`
-    - Alert resolution strategy -> `action_item_strategist`
+    You are an orchestrator for supervisor commands. Delegate to the correct specialist:
+    - **Inventory** -> `inventory_manager_agent`.
+    - **Approvals** -> `approval_agent`.
+    - **Action Items** -> `action_item_strategist`.
     """,
     tools=[
         AgentTool(agent=inventory_manager_agent),
