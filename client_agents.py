@@ -1,6 +1,5 @@
 import asyncio
 import os
-import base64
 from dotenv import load_dotenv
 
 # --- ADK IMPORTS ---
@@ -19,7 +18,7 @@ SUPERVISOR_RUNNER = None
 SESSION_SERVICE = InMemorySessionService()
 
 def initialize_adk_agents():
-    """Initializes both Victim and Supervisor ADK Agents."""
+    """Initializes the client-side ADK Agents (Proxies)."""
     global VICTIM_RUNNER, SUPERVISOR_RUNNER
     
     if "GOOGLE_API_KEY" not in os.environ:
@@ -27,52 +26,36 @@ def initialize_adk_agents():
 
     retry_config = types.HttpRetryOptions(attempts=3)
     
+    # 1. PROXIES
+    # These connect to your backend running on port 8001
     proxy_vic = RemoteA2aAgent(name="relief_manager", description="Hub", agent_card=f"http://localhost:8001{AGENT_CARD_WELL_KNOWN_PATH}")
     proxy_sup = RemoteA2aAgent(name="relief_manager", description="Hub", agent_card=f"http://localhost:8001{AGENT_CARD_WELL_KNOWN_PATH}")
 
-    valid_items = "water_bottles, food_packs, medical_kits, blankets, batteries"
-
-    # Victim Agent
-    victim_agent = LlmAgent(
+    # 2. VICTIM CLIENT (THIN PROXY)
+    # No logic here. Just forwards the message.
+    victim_client = LlmAgent(
         model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
-        name="victim_support_flask",
-        instruction=f"Victim Support. Items: [{valid_items}]. Map generic terms. Delegate to 'relief_manager'.",
+        name="victim_client",
+        instruction="You are a proxy. Pass the user's message directly to the 'relief_manager' sub-agent without modification.",
         sub_agents=[proxy_vic]
     )
-    VICTIM_RUNNER = Runner(agent=victim_agent, app_name="victim_frontend", session_service=SESSION_SERVICE)
+    VICTIM_RUNNER = Runner(agent=victim_client, app_name="victim_frontend", session_service=SESSION_SERVICE)
     
-    # --- 🔥 NEW, STRICT SUPERVISOR INSTRUCTIONS ---
-    supervisor_agent = LlmAgent(
+    # 3. SUPERVISOR CLIENT (THIN PROXY)
+    # No logic here. Just forwards the command.
+    supervisor_client = LlmAgent(
         model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
-        name="supervisor_flask",
-        instruction=f"""
-        You are a Relief Operation Supervisor. Your job is to manage inventory and approvals by delegating tasks to your sub-agent, 'relief_manager'.
-
-        CRITICAL WORKFLOW FOR BATCH OPERATIONS (e.g., "add 7 items"):
-        1.  **Acknowledge and Gather:** If the user's request is vague (like "add 7 items"), you MUST ask for the specific names and quantities for each item.
-        2.  **Construct JSON:** Once you have the list of items and quantities, you MUST construct a single, valid JSON dictionary string. The keys must be the EXACT item names (e.g., "water_bottles") and the values must be integers.
-            - Correct Example: '{{"water_bottles": 50, "tents": 20}}'
-            - Incorrect: 'water_bottles: 50, tents: 20' (This is not valid JSON)
-        3.  **Execute Batch Tool:** You MUST then ask 'relief_manager' to call the `admin_batch_update_inventory` tool, passing the complete JSON string you created as the `updates_json` argument.
-        4.  **Confirm:** Relay the success or failure message from the tool call back to the user.
-
-        - For single-item tasks (e.g., "approve request 5"), you can call the specific tool directly via 'relief_manager'.
-        - ALWAYS use your tools. Do not hallucinate actions.
-        """,
+        name="supervisor_client",
+        instruction="You are a proxy. Pass the supervisor's command directly to the 'relief_manager' sub-agent without modification.",
         sub_agents=[proxy_sup]
     )
-    SUPERVISOR_RUNNER = Runner(agent=supervisor_agent, app_name="supervisor_frontend", session_service=SESSION_SERVICE)
+    SUPERVISOR_RUNNER = Runner(agent=supervisor_client, app_name="supervisor_frontend", session_service=SESSION_SERVICE)
     
-    print("✅ ADK Agents Initialized with Strict Workflow.")
+    print("✅ Client-side Proxies Initialized (Logic is on Backend).")
 
-
-# --- ASYNC HELPER FOR FLASK ---
 async def run_agent_query(runner, user_id, session_id, message):
-    """A self-contained async function to run the agent."""
-    try:
-        await runner.session_service.create_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
-    except Exception:
-        pass
+    try: await runner.session_service.create_session(app_name=runner.app_name, user_id=user_id, session_id=session_id)
+    except: pass
 
     final_response = "Sorry, an agent error occurred."
     try:
@@ -81,6 +64,6 @@ async def run_agent_query(runner, user_id, session_id, message):
                 final_response = event.content.parts[0].text
     except Exception as e:
         final_response = f"Agent Error: {e}"
-        print(f"ERROR in run_agent_query: {e}")
+        print(f"ERROR: {e}")
     
     return final_response

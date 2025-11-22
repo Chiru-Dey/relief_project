@@ -11,20 +11,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- State ---
     let isListening = false;
-    // Generate unique IDs for this browser tab
     const CLIENT_ID = 'vic_' + Math.random().toString(36).substring(2, 9);
     let sessionId = 'session_' + Date.now();
 
-    // --- Core Functions ---
-
+    // --- Functions ---
     function autoResize() {
         textarea.style.height = 'auto';
         textarea.style.height = `${textarea.scrollHeight}px`;
-        if (textarea.scrollHeight > MAX_HEIGHT) {
-            textarea.style.overflowY = 'auto';
-        } else {
-            textarea.style.overflowY = 'hidden';
-        }
+        if (textarea.scrollHeight > MAX_HEIGHT) textarea.style.overflowY = 'auto';
+        else textarea.style.overflowY = 'hidden';
         sendBtn.disabled = !textarea.value.trim();
     }
 
@@ -39,14 +34,12 @@ document.addEventListener("DOMContentLoaded", () => {
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
     
-    // --- BACKEND COMMUNICATION (Queue Pattern) ---
-    
+    // --- BACKEND COMMUNICATION ---
     async function submitTask(payload) {
         const taskName = payload.text ? `Text: ${payload.text.substring(0, 15)}...` : "Audio Message";
-        showLoading(taskName);
+        showLoading();
 
         try {
-            // 🔥 FIX: Send to the correct unified endpoint
             await fetch('/api/submit_task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -60,7 +53,7 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         } catch (error) {
             hideLoading();
-            addBubble("Error: Could not submit task to the agent backend.", 'ai');
+            addBubble("Error: Could not connect to the agent backend.", 'ai');
         }
     }
     
@@ -71,6 +64,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.results && data.results.length > 0) {
                 hideLoading();
                 data.results.forEach(result => {
+                    // Only show victim-relevant responses
                     if (result.persona === 'victim') {
                         addBubble(result.output, 'ai');
                     }
@@ -82,8 +76,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     let loadingDivId = null;
-    function showLoading(taskName) {
-        hideLoading(); // Clear any old loaders
+    function showLoading() {
+        hideLoading(); 
         loadingDivId = 'loading-' + Date.now();
         const loader = document.createElement('div');
         loader.id = loadingDivId;
@@ -102,7 +96,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     
     // --- Event Handlers ---
-
     function handleSendText() {
         const text = textarea.value.trim();
         if (!text) return;
@@ -114,16 +107,23 @@ document.addEventListener("DOMContentLoaded", () => {
     let mediaRecorder, audioChunks = [];
     async function handleToggleMic() {
         isListening = !isListening;
-
-        // 🔥 FIX: Correctly toggle classes for 2-state button
-        micBtn.classList.toggle('listening', isListening);
-        micIcon.classList.toggle('hidden', isListening);
-        micIcon.classList.toggle('block', !isListening);
-        stopIcon.classList.toggle('hidden', !isListening);
-        stopIcon.classList.toggle('block', isListening);
+        
+        // Toggle Icons
+        if (isListening) {
+            micIcon.classList.remove('block');
+            micIcon.classList.add('hidden');
+            stopIcon.classList.remove('hidden');
+            stopIcon.classList.add('block');
+            micBtn.classList.add('listening');
+        } else {
+            stopIcon.classList.remove('block');
+            stopIcon.classList.add('hidden');
+            micIcon.classList.remove('hidden');
+            micIcon.classList.add('block');
+            micBtn.classList.remove('listening');
+        }
         
         if (isListening) {
-            // START RECORDING
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream);
@@ -140,15 +140,15 @@ document.addEventListener("DOMContentLoaded", () => {
                 };
                 mediaRecorder.start();
             } catch (err) { 
-                console.error("Microphone access denied:", err);
-                isListening = false; // Reset state on error
-                handleToggleMic(); // Revert UI
+                console.error("Mic Error:", err); 
+                isListening = false;
+                // Reset UI on error
+                stopIcon.classList.add('hidden');
+                micIcon.classList.remove('hidden');
+                micBtn.classList.remove('listening');
             }
         } else {
-            // STOP RECORDING
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                mediaRecorder.stop();
-            }
+            if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
         }
     }
 
@@ -161,5 +161,5 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- Init ---
     addBubble("Hello! How can I help you today?", "ai");
     autoResize();
-    setInterval(pollResults, 1000); // Start polling for results
+    setInterval(pollResults, 1000);
 });
