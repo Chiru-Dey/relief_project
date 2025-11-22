@@ -93,10 +93,21 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.target.classList.contains("restock-btn")) {
             currentRestockItem = e.target.dataset.item;
             document.getElementById("restockItemName").textContent = currentRestockItem.replace(/_/g, ' ');
+            
+            // FIXED: Clear input value before showing modal
+            document.getElementById("restockQtyInput").value = "";
+            
             restockModal.classList.remove("hidden");
         }
     };
-    addItemBtn.onclick = () => addItemModal.classList.remove("hidden");
+
+    addItemBtn.onclick = () => {
+        // FIXED: Clear input values before showing modal
+        document.getElementById("newItemNameInput").value = "";
+        document.getElementById("newItemQtyInput").value = "";
+        
+        addItemModal.classList.remove("hidden");
+    };
     
     // Modals
     document.getElementById("cancelRestock").onclick = () => restockModal.classList.add("hidden");
