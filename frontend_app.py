@@ -65,6 +65,34 @@ def data():
         return jsonify({"inventory": inv, "requests": req})
     except Exception as e: return jsonify({"error": str(e)}), 500
 
+@app.route("/api/audit_log", methods=["GET"])
+def get_audit_log():
+    """
+    Returns the list of recently COMPLETED (AI or Manual) actions.
+    This allows the Supervisor dashboard to see what the AI is doing.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        # Get last 20 actions that are NOT pending/required
+        rows = conn.execute("""
+            SELECT * FROM requests 
+            WHERE status NOT IN ('PENDING', 'ACTION_REQUIRED', 'FLAGGED') 
+            ORDER BY id DESC LIMIT 20
+        """).fetchall()
+        conn.close()
+        
+        logs = []
+        for r in rows:
+            logs.append({
+                "id": r["id"],
+                "action": f"{r['status']}: Dispatched {r['quantity']}x {r['item_name']} to {r['location']}",
+                "timestamp": "Just now" # In real app, use DB timestamp
+            })
+        return jsonify({"logs": logs})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     client_agents.initialize_adk_agents()
     threading.Thread(target=agent_worker, daemon=True).start()

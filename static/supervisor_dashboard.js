@@ -45,6 +45,40 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (e) { log(`Network Error: ${e}`); }
     }
 
+    async function fetchAuditLog() {
+        try {
+            const res = await fetch("/api/audit_log");
+            const data = await res.json();
+            if (data.logs) {
+                renderLogs(data.logs);
+            }
+        } catch (e) { console.error("Log fetch error", e); }
+    }
+
+    function renderLogs(logs) {
+        logContainer.innerHTML = ""; // Clear old logs
+        if (logs.length === 0) {
+            logContainer.innerHTML = "<p>No recent activity.</p>";
+            return;
+        }
+        logs.forEach(l => {
+            const p = document.createElement("p");
+            p.style.borderBottom = "1px solid #333";
+            p.style.paddingBottom = "4px";
+            p.style.marginBottom = "4px";
+            // Color code based on status
+            let color = "#10B981"; // Green for AI_APPROVED
+            if (l.action.includes("REJECTED")) color = "#EF4444";
+            
+            p.innerHTML = `<span style="color:${color}">●</span> ${l.action}`;
+            logContainer.appendChild(p);
+        });
+    }
+
+    // --- Loop for Logs ---
+    setInterval(fetchAuditLog, 3000); // Poll logs every 3s
+    
+
     // --- RENDER ---
     function renderInventory(items) {
         inventoryList.innerHTML = "";

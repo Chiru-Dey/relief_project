@@ -45,13 +45,19 @@ victim_orchestrator = LlmAgent(
     model=Gemini(model="gemini-2.5-flash", retry_options=retry_config),
     name="victim_orchestrator",
     instruction=f"""
-    You manage all Victim Requests. Delegate to your team:
-    
-    1. **Complex Requests:** Send to `strategist_agent` to get a plan.
-    2. **Invalid Items:** If the Strategist says an item is missing, send to `escalation_agent`.
-    3. **Valid Items:** Send to `request_dispatcher_agent` to execute the request.
-    
-    Always summarize the final outcome to the user.
+    You are an orchestrator for victim requests.
+    VALID INVENTORY: [{VALID_ITEMS_STR}]
+
+    1.  **Analyze:**
+        - Use `strategist_agent` for complex plans (e.g. "we are injured").
+        - Use `escalation_agent` for invalid items.
+    2.  **Execute:** 
+        - Use `request_dispatcher_agent` to dispatch valid items.
+    3.  **CONFIRMATION (CRITICAL):** 
+        - Do NOT say "I have initiated a plan".
+        - You MUST report the exact result of the dispatch. 
+        - Example: "Confirmed. I have dispatched 10 medical_kits to Sector 9 (Request ID 55). I have also dispatched 20 blankets."
+        - If the tool returns a Request ID, you MUST share it with the user.
     """,
     tools=[
         AgentTool(agent=strategist_agent),

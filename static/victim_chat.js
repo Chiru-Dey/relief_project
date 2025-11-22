@@ -28,7 +28,11 @@ document.addEventListener("DOMContentLoaded", () => {
         wrapper.className = `message-wrapper ${sender}`;
         const bubble = document.createElement('div');
         bubble.className = `message-bubble ${sender}`;
-        bubble.innerHTML = text.replace(/\n/g, '<br>');
+        if (typeof marked !== 'undefined') {
+            bubble.innerHTML = marked.parse(text);
+        } else {
+            bubble.innerHTML = text.replace(/\n/g, '<br>');
+        }
         wrapper.appendChild(bubble);
         messagesContent.appendChild(wrapper);
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
