@@ -15,7 +15,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- API CALLS ---
     async function submitTask(payload) {
-        log(`⏳ Queued: ${payload.task_name}`, "local");
+        const queuedMsg = `⏳ Queued: ${payload.task_name}`;
+        log(queuedMsg, "queued");
+        
+        // Log to activity log
+        logToActivityLog(queuedMsg, "info");
+        
         try {
             await fetch("/api/submit_task", {
                 method: "POST",
@@ -27,7 +32,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // 🔥 NEW: Direct Admin Call
     async function submitAdminAction(url, payload, actionName) {
-        log(`⚙️ Processing: ${actionName}...`, "local");
+        const processingMsg = `⚙️ Processing: ${actionName}...`;
+        log(processingMsg, "queued");
+        logToActivityLog(processingMsg, "info");
+        
         try {
             const res = await fetch(url, {
                 method: "POST",
@@ -36,13 +44,21 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             const data = await res.json();
             if (data.success) {
-                log(`✅ Success: ${data.message}`, "server");
+                const successMsg = `✅ Success: ${data.message}`;
+                log(successMsg, "server");
+                // Admin actions are already logged by backend, no need to duplicate
                 fetchData(); // Refresh UI immediately
                 fetchAuditLog(); // Refresh logs
             } else {
-                log(`❌ Error: ${data.error}`, "error");
+                const errorMsg = `❌ Error: ${data.error}`;
+                log(errorMsg, "error");
+                logToActivityLog(errorMsg, "error");
             }
-        } catch (e) { log(`❌ Network Error: ${e}`, "error"); }
+        } catch (e) { 
+            const networkError = `❌ Network Error: ${e}`;
+            log(networkError, "error");
+            logToActivityLog(networkError, "error");
+        }
     }
     
     async function pollResults() {
@@ -52,8 +68,12 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.results?.length > 0) {
                 data.results.forEach(r => {
                      // Simple error check
-                     const type = r.output.includes("ERROR") ? "error" : "local";
-                     log(`✅ ${r.task_name}: ${r.output}`, type);
+                     const type = r.output.includes("ERROR") ? "error" : "response";
+                     const responseMsg = `✅ ${r.task_name}: ${r.output}`;
+                     log(responseMsg, type);
+                     
+                     // Log to activity log
+                     logToActivityLog(responseMsg, type === "error" ? "error" : "success");
                 });
                 fetchData(); 
             }
@@ -86,6 +106,40 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (e) {}
     }
 
+    async function fetchActivityLog() {
+        try {
+            const res = await fetch("/api/supervisor_activity_log");
+            const data = await res.json();
+            if (data.logs?.length > 0) {
+                // Display all activity logs (they're already timestamped)
+                data.logs.forEach(l => {
+                    const logKey = `${l.timestamp}_${l.action}`;
+                    if (!seenLogIds.has(logKey)) {
+                        seenLogIds.add(logKey);
+                        // Map log type to display type
+                        let displayType = "server";
+                        if (l.type === "error") displayType = "error";
+                        else if (l.type === "success") displayType = "server";
+                        else if (l.type === "system") displayType = "server";
+                        // Don't add timestamp here since log() function adds its own
+                        log(l.action, displayType);
+                    }
+                });
+            }
+        } catch (e) {}
+    }
+
+    // Helper to log to backend activity log
+    async function logToActivityLog(message, logType) {
+        try {
+            await fetch("/api/log_supervisor_activity", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: message, type: logType })
+            });
+        } catch (e) {}
+    }
+
     function log(message, type="local") {
         const p = document.createElement("div");
         p.className = "log-entry";
@@ -93,6 +147,8 @@ document.addEventListener("DOMContentLoaded", () => {
         let colorClass = "log-local";
         if (type === "error") colorClass = "log-error";
         if (type === "server") colorClass = "log-server";
+        if (type === "queued") colorClass = "log-queued"; // Yellow for queued
+        if (type === "response") colorClass = "log-response"; // Blue for responses
         p.innerHTML = `<span class="log-time">[${time}]</span><span class="${colorClass}">${message}</span>`;
         logContainer.prepend(p);
     }
@@ -167,15 +223,37 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.target.classList.contains("approve-btn")) submitTask({ text: `Approve request ID ${id}`, task_name: `Approving ${id}` });
         if (e.target.classList.contains("reject-btn")) submitTask({ text: `Reject request ID ${id}`, task_name: `Rejecting ${id}` });
         if (e.target.classList.contains("resolve-btn")) {
-            const notes = e.target.dataset.notes;
-            commandInput.value = `Fix action item ${id} immediately. Notes: '${notes}'. Restock buffer, send to victim, mark resolved.`;
-            commandInput.focus();
+            // Directly call the resolve API
+            log(`⏳ Resolving action item ${id}...`, "queued");
+            logToActivityLog(`⏳ Resolving action item ${id}...`, "info");
+            
+            fetch(`/api/admin/resolve/${id}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" }
+            }).then(res => res.json()).then(data => {
+                if (data.success) {
+                    log(`✅ ${data.message}`, "server");
+                    logToActivityLog(data.message, "success");
+                    if (data.dispatches && data.dispatches.length > 0) {
+                        data.dispatches.forEach(d => {
+                            log(`  ${d}`, "server");
+                            logToActivityLog(d, "system");
+                        });
+                    }
+                    fetchData(); // Refresh
+                } else {
+                    log(`❌ Resolve failed: ${data.error}`, "error");
+                    logToActivityLog(`Resolve failed: ${data.error}`, "error");
+                }
+            }).catch(e => log(`❌ Error: ${e}`, "error"));
         }
     };
 
     fetchData();
     fetchAuditLog();
+    fetchActivityLog();
     setInterval(pollResults, 1000);
     setInterval(fetchAuditLog, 3000);
+    setInterval(fetchActivityLog, 2000);  // Poll activity log more frequently
     setInterval(fetchData, 5000);
 });

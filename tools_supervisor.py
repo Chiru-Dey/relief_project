@@ -20,6 +20,67 @@ def supervisor_mark_action_taken(task_id: int, notes: str) -> str:
     database.update_request_status(task_id, "ACTION_TAKEN", f"Human action: {notes}")
     return f"SUCCESS: Task {task_id} marked completed."
 
+def supervisor_resolve_action_required(task_id: int, buffer_multiplier: float = 1.5) -> str:
+    """
+    Resolve an ACTION_REQUIRED task by automatically restocking with buffer and dispatching.
+    buffer_multiplier: How much extra to restock (e.g., 1.5 = 50% buffer, 2.0 = 100% buffer)
+    """
+    task = database.get_request_by_id(task_id)
+    if not task: 
+        return f"Error: Task {task_id} not found."
+    
+    if task['status'] != 'ACTION_REQUIRED':
+        return f"Error: Task {task_id} is not ACTION_REQUIRED (current status: {task['status']})."
+    
+    item_name = task['item_name']
+    quantity_needed = task['quantity']
+    location = task['location']
+    
+    # Calculate restock amount with buffer
+    restock_amount = int(quantity_needed * buffer_multiplier)
+    
+    # Restock the item
+    current_stock = database.get_item_stock(item_name)
+    if current_stock == -1:
+        # Item doesn't exist, create it
+        database.add_new_item(item_name, restock_amount)
+        result_msg = f"Created new item '{item_name}' with {restock_amount} units (needed {quantity_needed} + buffer)."
+    else:
+        # Item exists, add stock
+        new_total = database.increment_stock(item_name, restock_amount)
+        result_msg = f"Restocked '{item_name}' with {restock_amount} units. New total: {new_total}."
+    
+    # Dispatch the needed quantity
+    current_stock = database.get_item_stock(item_name)
+    if current_stock >= quantity_needed:
+        # Dispatch the requested amount
+        database.update_stock(item_name, current_stock - quantity_needed)
+        
+        # Send notification to victim
+        import tools_client
+        session_id = database.get_session_for_location(location)
+        if session_id:
+            tools_client.send_victim_chat_message(
+                session_id,
+                f"Hey! Great news - we just restocked and your request for {quantity_needed} {item_name.replace('_', ' ')} is now on its way to {location}! Thanks for your patience. 🙏"
+            )
+        
+        # Log the dispatch
+        tools_client.log_to_supervisor_activity(
+            f"AUTO-DISPATCH: Dispatched {quantity_needed}x {item_name} to {location} (from resolve of request #{task_id})",
+            "system"
+        )
+        
+        final_stock = database.get_item_stock(item_name)
+        result_msg += f"\n\nAuto-dispatched {quantity_needed} units to {location}. Buffer remaining: {final_stock}."
+    else:
+        result_msg += f"\n\nWarning: After restock, stock is {current_stock} but needed {quantity_needed}."
+    
+    # Mark this task as ACTION_TAKEN
+    database.update_request_status(task_id, "ACTION_TAKEN", f"Resolved with restock: {restock_amount} units, dispatched {quantity_needed}")
+    
+    return result_msg
+
 def supervisor_decide_request(request_id: int, decision: str) -> str:
     # ... same as before ...
     decision = decision.upper()

@@ -14,8 +14,24 @@ def init_db():
     # Requests
     c.execute('''CREATE TABLE IF NOT EXISTS requests (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, item_name TEXT, quantity INTEGER,
-                    location TEXT, status TEXT, urgency TEXT, notes TEXT
+                    location TEXT, status TEXT, urgency TEXT, notes TEXT, session_id TEXT
                 )''')
+    
+    # Migrate old requests table if session_id column doesn't exist
+    try:
+        c.execute("SELECT session_id FROM requests LIMIT 1")
+    except:
+        # Column doesn't exist, add it
+        c.execute("ALTER TABLE requests ADD COLUMN session_id TEXT")
+        conn.commit()
+    
+    # Active sessions table for cross-process session tracking
+    c.execute('''CREATE TABLE IF NOT EXISTS active_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    location TEXT,
+                    timestamp INTEGER
+                )''')
+    conn.commit()
     
     # Seed Data
     c.execute("SELECT count(*) FROM inventory")
@@ -80,11 +96,17 @@ def increment_stock(item_name: str, amount_to_add: int) -> int:
     conn.close()
     return row['quantity'] if row else 0
 
-def create_request(item_name: str, quantity: int, location: str, status: str, urgency: str, notes: str) -> int:
+def create_request(item_name: str, quantity: int, location: str, status: str, urgency: str, notes: str, session_id: str = None) -> int:
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO requests (item_name, quantity, location, status, urgency, notes) VALUES (?, ?, ?, ?, ?, ?)", 
-                   (item_name, quantity, location, status, urgency, notes))
+    # Check if session_id column exists, if not just insert without it
+    try:
+        cursor.execute("INSERT INTO requests (item_name, quantity, location, status, urgency, notes, session_id) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                       (item_name, quantity, location, status, urgency, notes, session_id))
+    except:
+        # Fallback for old schema without session_id
+        cursor.execute("INSERT INTO requests (item_name, quantity, location, status, urgency, notes) VALUES (?, ?, ?, ?, ?, ?)", 
+                       (item_name, quantity, location, status, urgency, notes))
     req_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -108,6 +130,40 @@ def update_request_status(request_id: int, status: str, notes: str = None):
         conn.execute("UPDATE requests SET status = ?, notes = ? WHERE id = ?", (status, notes, request_id))
     else:
         conn.execute("UPDATE requests SET status = ? WHERE id = ?", (status, request_id))
+    conn.commit()
+    conn.close()
+
+# --- ACTIVE SESSIONS MANAGEMENT ---
+def register_active_session(session_id: str, location: str):
+    """Register an active victim session with location"""
+    import time
+    conn = get_db_connection()
+    conn.execute(
+        "INSERT OR REPLACE INTO active_sessions (session_id, location, timestamp) VALUES (?, ?, ?)",
+        (session_id, location, int(time.time()))
+    )
+    conn.commit()
+    conn.close()
+
+def get_session_for_location(location: str):
+    """Get the most recent session ID for a location (within last 10 minutes)"""
+    import time
+    conn = get_db_connection()
+    cutoff = int(time.time()) - 600  # 10 minutes ago
+    cursor = conn.execute(
+        "SELECT session_id FROM active_sessions WHERE location = ? AND timestamp > ? ORDER BY timestamp DESC LIMIT 1",
+        (location, cutoff)
+    )
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
+
+def cleanup_old_sessions():
+    """Remove sessions older than 1 hour"""
+    import time
+    conn = get_db_connection()
+    cutoff = int(time.time()) - 3600  # 1 hour ago
+    conn.execute("DELETE FROM active_sessions WHERE timestamp < ?", (cutoff,))
     conn.commit()
     conn.close()
 
