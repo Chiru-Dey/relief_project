@@ -10,79 +10,75 @@ document.addEventListener("DOMContentLoaded", () => {
     const addItemModal = document.getElementById("addItemModal");
     const addItemBtn = document.getElementById("addItemBtn");
     
-    let currentRestockItem = "";
     const CLIENT_ID = 'sup_' + Math.random().toString(36).substring(2, 9);
+    let currentRestockItem = "";
+    const seenLogIds = new Set();
 
     // --- API ---
     async function submitTask(payload) {
-        log(`⏳ Queued: ${payload.task_name}`);
+        log(`⏳ Queued: ${payload.task_name}`, "local");
         try {
             await fetch("/api/submit_task", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ ...payload, client_id: CLIENT_ID, persona: "supervisor" }),
             });
-        } catch (e) { log(`❌ Error: ${e}`); }
+        } catch (e) { log(`❌ Error: ${e}`, "error"); }
     }
     
     async function pollResults() {
         try {
             const res = await fetch(`/api/get_results/${CLIENT_ID}`);
             const data = await res.json();
-            if (data.results?.length > 0) {
-                data.results.forEach(r => log(`✅ ${r.task_name}: ${r.output}`));
-                fetchData();
+            if (data.results && data.results.length > 0) {
+                data.results.forEach(result => {
+                    const output = result.output;
+                    
+                    // 🔥 FIX: Smart Error Detection
+                    if (output.startsWith("ERROR") || output.includes("System busy") || output.includes("failed")) {
+                        log(`❌ ${result.task_name}: ${output}`, "error"); // RED
+                    } else {
+                        log(`✅ ${result.task_name}: ${output}`, "local"); // GREEN
+                    }
+                });
+                fetchData(); 
             }
-        } catch (e) {}
+        } catch (e) { console.error(e); }
     }
+
 
     async function fetchData() {
         try {
             const res = await fetch("/api/supervisor_data");
             const data = await res.json();
+            if (data.error) return;
             renderInventory(data.inventory);
             renderRequests(data.requests);
-        } catch (e) { log(`Network Error: ${e}`); }
+        } catch (e) {}
     }
 
     async function fetchAuditLog() {
         try {
             const res = await fetch("/api/audit_log");
             const data = await res.json();
-            if (data.logs) {
-                renderLogs(data.logs);
+            if (data.logs && data.logs.length > 0) {
+                data.logs.forEach(l => {
+                    if (!seenLogIds.has(l.id)) {
+                        seenLogIds.add(l.id);
+                        log(`SYSTEM: ${l.action}`, "server");
+                    }
+                });
             }
-        } catch (e) { console.error("Log fetch error", e); }
+        } catch (e) {}
     }
-
-    function renderLogs(logs) {
-        logContainer.innerHTML = ""; // Clear old logs
-        if (logs.length === 0) {
-            logContainer.innerHTML = "<p>No recent activity.</p>";
-            return;
-        }
-        logs.forEach(l => {
-            const p = document.createElement("p");
-            p.style.borderBottom = "1px solid #333";
-            p.style.paddingBottom = "4px";
-            p.style.marginBottom = "4px";
-            // Color code based on status
-            let color = "#10B981"; // Green for AI_APPROVED
-            if (l.action.includes("REJECTED")) color = "#EF4444";
-            
-            p.innerHTML = `<span style="color:${color}">●</span> ${l.action}`;
-            logContainer.appendChild(p);
-        });
-    }
-
-    // --- Loop for Logs ---
-    setInterval(fetchAuditLog, 3000); // Poll logs every 3s
-    
 
     // --- RENDER ---
     function renderInventory(items) {
         inventoryList.innerHTML = "";
-        if (!items?.length) { inventoryList.innerHTML = "<p>No inventory.</p>"; return; }
+        if (!items || items.length === 0) {
+            inventoryList.innerHTML = "<p>No inventory found.</p>";
+            return;
+        }
         items.forEach(item => {
             const div = document.createElement("div");
             div.className = "inventory-item";
@@ -93,7 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function renderRequests(requests) {
         requestList.innerHTML = "";
-        if (!requests?.length) { requestList.innerHTML = "<p>No attention items.</p>"; return; }
+        if (!requests || requests.length === 0) { requestList.innerHTML = "<p>No items require attention.</p>"; return; }
         requests.forEach(req => {
             const div = document.createElement("div");
             div.className = "request-item";
@@ -106,10 +102,14 @@ document.addEventListener("DOMContentLoaded", () => {
             requestList.appendChild(div);
         });
     }
+    
 
-    function log(msg) {
-        const p = document.createElement("p");
-        p.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    function log(message, type="local") {
+        const p = document.createElement("div");
+        p.className = "log-entry";
+        const time = new Date().toLocaleTimeString();
+        const colorClass = type === "error" ? "log-error" : (type === "server" ? "log-server" : "log-local");
+        p.innerHTML = `<span class="log-time">[${time}]</span><span class="${colorClass}">${message}</span>`;
         logContainer.prepend(p);
     }
 
@@ -117,7 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
     refreshBtn.onclick = fetchData;
     commandSendBtn.onclick = () => {
         if (commandInput.value) {
-            submitTask({ text: commandInput.value, task_name: `CMD: ${commandInput.value}` });
+            submitTask({ text: commandInput.value, task_name: `CMD: ${commandInput.value.substring(0, 20)}` });
             commandInput.value = "";
         }
     };
@@ -127,23 +127,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.target.classList.contains("restock-btn")) {
             currentRestockItem = e.target.dataset.item;
             document.getElementById("restockItemName").textContent = currentRestockItem.replace(/_/g, ' ');
-            
-            // FIXED: Clear input value before showing modal
-            document.getElementById("restockQtyInput").value = "";
-            
             restockModal.classList.remove("hidden");
         }
     };
-
-    addItemBtn.onclick = () => {
-        // FIXED: Clear input values before showing modal
-        document.getElementById("newItemNameInput").value = "";
-        document.getElementById("newItemQtyInput").value = "";
-        
-        addItemModal.classList.remove("hidden");
-    };
-    
-    // Modals
+    addItemBtn.onclick = () => addItemModal.classList.remove("hidden");
     document.getElementById("cancelRestock").onclick = () => restockModal.classList.add("hidden");
     document.getElementById("cancelAddItem").onclick = () => addItemModal.classList.add("hidden");
     
@@ -152,6 +139,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if(qty) {
             submitTask({ text: `Add ${qty} units to inventory for item '${currentRestockItem}'`, task_name: `Restocking ${currentRestockItem}` });
             restockModal.classList.add("hidden");
+            document.getElementById("restockQtyInput").value = "";
         }
     };
     document.getElementById("confirmAddItem").onclick = () => {
@@ -160,6 +148,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if(name && qty) {
             submitTask({ text: `Add new item '${name}' with ${qty} units`, task_name: `Adding ${name}` });
             addItemModal.classList.add("hidden");
+            document.getElementById("newItemNameInput").value = "";
         }
     };
 
@@ -168,13 +157,21 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!id) return;
         if (e.target.classList.contains("approve-btn")) submitTask({ text: `Approve request ID ${id}`, task_name: `Approving ${id}` });
         if (e.target.classList.contains("reject-btn")) submitTask({ text: `Reject request ID ${id}`, task_name: `Rejecting ${id}` });
+        
+        // 🔥 UPDATED: SEND "FIX IT" COMMAND
         if (e.target.classList.contains("resolve-btn")) {
             const notes = e.target.dataset.notes;
-            commandInput.value = `I need to resolve action item ${id}. Notes: ${notes}. Suggest a plan.`;
+            // The prompt now COMMANDS the agent to fix the issue, rather than asking for advice.
+            const command = `Fix action item ${id} immediately. Read the notes: '${notes}'. Restock the item with a buffer, send the required amount to the victim, and mark the task as resolved.`;
+            
+            commandInput.value = command;
             commandInput.focus();
         }
     };
 
     fetchData();
+    fetchAuditLog();
     setInterval(pollResults, 1000);
+    setInterval(fetchAuditLog, 3000);
+    setInterval(fetchData, 5000);
 });
