@@ -1,4 +1,5 @@
 import time
+import asyncio
 import re
 import random
 from google.adk.models.google_llm import Gemini
@@ -58,6 +59,46 @@ class SmartGemini(Gemini):
                         print(f"⏳ Backend Rate Limit: Backing off {wait_time:.2f}s...")
                     
                     time.sleep(wait_time)
+                    continue # Retry the loop
+                
+                # Re-raise other errors immediately
+                raise e
+
+    async def generate_content_async(self, *args, **kwargs):
+        """
+        Async version with retry logic for A2A backend calls.
+        """
+        max_retries = 10
+        current_attempt = 0
+
+        while True:
+            try:
+                # Attempt the actual async API call
+                async for response in super().generate_content_async(*args, **kwargs):
+                    yield response
+                return  # Success, exit the retry loop
+
+            except Exception as e:
+                error_str = str(e)
+                
+                # Check for Rate Limits (429)
+                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "Quota" in error_str:
+                    current_attempt += 1
+                    if current_attempt > max_retries:
+                        print(f"❌ Backend: Rate limit exceeded after {max_retries} retries")
+                        raise e # Give up after 10 tries
+
+                    # 1. Try to get exact time from Google
+                    wait_time = self._extract_wait_time(error_str)
+                    
+                    if wait_time:
+                        wait_time += 1.0 # Add 1s buffer
+                        print(f"⏳ Backend Rate Limit: Sleeping {wait_time:.2f}s... (attempt {current_attempt}/{max_retries})")
+                    else:
+                        wait_time = self._calculate_backoff(current_attempt)
+                        print(f"⏳ Backend Rate Limit: Backing off {wait_time:.2f}s... (attempt {current_attempt}/{max_retries})")
+                    
+                    await asyncio.sleep(wait_time)
                     continue # Retry the loop
                 
                 # Re-raise other errors immediately

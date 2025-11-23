@@ -122,37 +122,53 @@ def agent_worker():
                 if "429" in error_str or "RESOURCE" in error_str or "Quota" in error_str:
                     if attempt < max_retries:
                         wait = extract_retry_delay(error_str) or calculate_backoff(attempt)
+                        print(f"⏳ Frontend: Rate limit hit, retrying after {wait:.2f}s (attempt {attempt + 1}/{max_retries})")
                         time.sleep(wait + 1)
                         continue
-                    else: return "System busy (Rate Limit)."
+                    else:
+                        print(f"❌ Frontend: Rate limit exceeded after {max_retries} retries")
+                        return None  # Don't send error to frontend
                 elif "503" in error_str:
                     time.sleep(2)
                     continue
                 else:
-                    return "Connection Error."
-        return "Timeout."
+                    print(f"❌ Frontend: Connection error: {error_str}")
+                    return None  # Don't send error to frontend
+        return None  # Timeout - don't send to frontend
 
     while True:
         job = TASK_QUEUE.get()
         if job is None: break
         
         # Save User Message to History
+        user_msg_added = False
         if job["persona"] == "victim":
             sess_id = job.get("session_id")
             if sess_id not in CHAT_STORE: CHAT_STORE[sess_id] = []
             msg_text = job.get("text", "Audio Message")
             CHAT_STORE[sess_id].append({"sender": "user", "text": msg_text})
+            user_msg_added = True
 
         client_id = job["client_id"]
         res = loop.run_until_complete(run_task(job))
 
-        # Save AI Response to History
-        if job["persona"] == "victim":
-            sess_id = job.get("session_id")
-            CHAT_STORE[sess_id].append({"sender": "ai", "text": res})
+        # Only save and send to frontend if we have a valid response
+        if res is not None:
+            # Save AI Response to History
+            if job["persona"] == "victim":
+                sess_id = job.get("session_id")
+                CHAT_STORE[sess_id].append({"sender": "ai", "text": res})
 
-        if client_id not in JOB_RESULTS: JOB_RESULTS[client_id] = []
-        JOB_RESULTS[client_id].append({"task_name": job["task_name"], "output": res, "persona": job["persona"]})
+            if client_id not in JOB_RESULTS: JOB_RESULTS[client_id] = []
+            JOB_RESULTS[client_id].append({"task_name": job["task_name"], "output": res, "persona": job["persona"]})
+        else:
+            print(f"⚠️ Skipping result for {job['task_name']} - backend error suppressed")
+            # Remove user message from history if we added it but got no response
+            if user_msg_added and job["persona"] == "victim":
+                sess_id = job.get("session_id")
+                if CHAT_STORE.get(sess_id) and CHAT_STORE[sess_id][-1]["sender"] == "user":
+                    CHAT_STORE[sess_id].pop()
+                    print(f"   Removed orphaned user message from chat history")
 
 # --- ROUTES ---
 @app.route("/")
