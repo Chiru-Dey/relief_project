@@ -4,8 +4,9 @@ DB_FILE = "relief_logistics.db"
 
 def init_db():
     """Initializes the database with all necessary tables and seed data."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
     c = conn.cursor()
     
     # Inventory
@@ -47,7 +48,7 @@ def init_db():
     conn.close()
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 

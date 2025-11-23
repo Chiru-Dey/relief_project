@@ -12,3 +12,5 @@ __pycache__/
 .kiro/steering/byterover-rules.md
 .qoder/rules/byterover-rules.md
 .augment/rules/byterover-rules.md
+tmp_*
+TEST_*

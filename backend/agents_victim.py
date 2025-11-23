@@ -40,8 +40,17 @@ Example:
 escalation_agent = Agent(
     model=SmartGemini(model="gemini-2.5-flash"),
     name="escalation_agent",
-    instruction="Call `log_inventory_gap`.",
-    tools=[tools_client.log_inventory_gap]
+    instruction="""Log issues to supervisor. YOU MUST ALWAYS call one of these functions when invoked:
+    
+    - Use `log_inventory_gap(item_name, quantity, location, session_id, is_partial)` for items that EXIST in inventory but are out of stock or insufficient
+    - Use `log_new_item_request(item_name, quantity, location)` for items that DON'T EXIST in inventory at all
+    
+    When called for a non-existent item (like helicopters, rockets, etc.), you MUST call log_new_item_request 
+    to flag the supervisor that victims are requesting new types of items.
+    
+    Always call the appropriate function - never just return without logging!
+    """,
+    tools=[tools_client.log_inventory_gap, tools_client.log_new_item_request]
 )
 
 request_dispatcher_agent = Agent(
@@ -79,17 +88,33 @@ Examples:
 victim_orchestrator = Agent(
     model=SmartGemini(model="gemini-2.5-flash"),
     name="victim_orchestrator",
-    instruction=f"""You orchestrate relief requests. YOU MUST PRESERVE CONTEXT FROM ALL PREVIOUS MESSAGES.
+    instruction=f"""You orchestrate relief requests for disaster victims. YOU MUST PRESERVE CONTEXT FROM ALL PREVIOUS MESSAGES.
 
-CRITICAL RULE: When user provides location/clarification, look at PREVIOUS messages for items and quantities!
+CRITICAL RULES:
+1. You ONLY handle relief requests - you CANNOT add items to inventory or perform admin actions
+2. ONLY these items are available: [{VALID_ITEMS_STR}]
+3. When user provides location/clarification, look at PREVIOUS messages for items and quantities!
+4. If user requests invalid items, politely explain what items ARE available
 
 Step-by-step process:
 1. Call `strategist_agent` to extract ALL info from conversation history
 2. If strategist found items, quantities, AND location → proceed to step 3
 3. If missing info → ask ONLY for what's missing (don't ask for info already mentioned)
 4. For each item: Call `item_finder_agent` to normalize item name
-5. For each item: Call `request_dispatcher_agent` with (normalized_name, quantity, location)
-6. Summarize results naturally
+   - If item_finder returns 'None' → Item is NOT available in inventory
+     • MANDATORY: You MUST call `escalation_agent` to log this to supervisor using log_new_item_request(item_name, quantity, location)
+     • Then tell user politely that item is unavailable and list available items
+   - If item_finder returns valid name → proceed to step 5
+5. For valid items only: Call `request_dispatcher_agent` with (normalized_name, quantity, location)
+6. Summarize results naturally with empathy
+
+Example - INVALID ITEM:
+- User: "I need 10 helicopters"
+- You: "I'm sorry, helicopters are not available in our relief supplies. We have: water_bottles, food_packs, medical_kits, blankets, and batteries. Can I help you with any of these?"
+
+Example - MIXED VALID/INVALID:
+- User: "I need 5 blankets and 3 rockets"
+- You: Process blankets normally, then: "I dispatched 5 blankets. However, rockets are not available. We only have: water_bottles, food_packs, medical_kits, blankets, and batteries."
 
 Example of CORRECT behavior:
 - User: "need 20 water bottles, 5 tents"

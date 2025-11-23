@@ -2,6 +2,7 @@ import database
 from difflib import get_close_matches
 import requests
 import threading
+from typing import Optional
 
 # Frontend server URL for logging supervisor activities
 FRONTEND_URL = "http://localhost:5000"
@@ -85,7 +86,7 @@ def check_inventory(item_name: str) -> str:
         all_items = database.get_all_item_names()
         return f"ERROR: Item '{item_name}' not found. Valid items are: {', '.join(all_items)}."
 
-def log_inventory_gap(item_name: str, quantity: int, location: str, session_id: str = None, is_partial: bool = False) -> str:
+def log_inventory_gap(item_name: str, quantity: int, location: str, session_id: Optional[str] = None, is_partial: bool = False) -> str:
     """
     Logs that a user requested an item not in inventory (or insufficient stock).
     - If is_partial=True (partial fulfillment): Creates ACTION_REQUIRED for supervisor to manually resolve
@@ -112,6 +113,29 @@ def log_inventory_gap(item_name: str, quantity: int, location: str, session_id: 
         session_id=session_id
     )
     return f"Logged {'action required' if is_partial else 'pending request'} for {quantity}x {item_name}."
+
+def log_new_item_request(item_name: str, quantity: int, location: str) -> str:
+    """
+    Logs when a victim requests an item that doesn't exist in inventory at all.
+    Flags supervisor to consider adding this item.
+    """
+    database.create_request(
+        item_name=item_name,
+        quantity=quantity,
+        location=location,
+        status="ACTION_REQUIRED",
+        urgency="NORMAL",
+        notes=f"NEW ITEM REQUEST: User at {location} requested {quantity}x '{item_name}' which is not in our inventory. Consider adding this item if demand is high.",
+        session_id=None
+    )
+    
+    # Also log to activity log
+    log_to_supervisor_activity(
+        f"NEW ITEM REQUESTED: {item_name} (qty: {quantity}) at {location} - Not in inventory",
+        "info"
+    )
+    
+    return f"Logged new item request for supervisor review: {item_name}"
 
 def send_victim_chat_message(session_id: str, message: str):
     """Send a chat message to victim's conversation (appears as AI message)"""
