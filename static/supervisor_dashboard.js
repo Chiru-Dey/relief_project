@@ -5,16 +5,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const refreshBtn = document.getElementById("refreshBtn");
     const commandInput = document.getElementById("commandInput");
     const commandSendBtn = document.getElementById("commandSendBtn");
-    
     const restockModal = document.getElementById("restockModal");
     const addItemModal = document.getElementById("addItemModal");
     const addItemBtn = document.getElementById("addItemBtn");
     
-    const CLIENT_ID = 'sup_' + Math.random().toString(36).substring(2, 9);
     let currentRestockItem = "";
+    const CLIENT_ID = 'sup_' + Math.random().toString(36).substring(2, 9);
     const seenLogIds = new Set();
 
-    // --- API ---
+    // --- API CALLS ---
     async function submitTask(payload) {
         log(`⏳ Queued: ${payload.task_name}`, "local");
         try {
@@ -25,35 +24,50 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         } catch (e) { log(`❌ Error: ${e}`, "error"); }
     }
+
+    // 🔥 NEW: Direct Admin Call
+    async function submitAdminAction(url, payload, actionName) {
+        log(`⚙️ Processing: ${actionName}...`, "local");
+        try {
+            const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (data.success) {
+                log(`✅ Success: ${data.message}`, "server");
+                fetchData(); // Refresh UI immediately
+                fetchAuditLog(); // Refresh logs
+            } else {
+                log(`❌ Error: ${data.error}`, "error");
+            }
+        } catch (e) { log(`❌ Network Error: ${e}`, "error"); }
+    }
     
     async function pollResults() {
         try {
             const res = await fetch(`/api/get_results/${CLIENT_ID}`);
             const data = await res.json();
-            if (data.results && data.results.length > 0) {
-                data.results.forEach(result => {
-                    const output = result.output;
-                    
-                    // 🔥 FIX: Smart Error Detection
-                    if (output.startsWith("ERROR") || output.includes("System busy") || output.includes("failed")) {
-                        log(`❌ ${result.task_name}: ${output}`, "error"); // RED
-                    } else {
-                        log(`✅ ${result.task_name}: ${output}`, "local"); // GREEN
-                    }
+            if (data.results?.length > 0) {
+                data.results.forEach(r => {
+                     // Simple error check
+                     const type = r.output.includes("ERROR") ? "error" : "local";
+                     log(`✅ ${r.task_name}: ${r.output}`, type);
                 });
                 fetchData(); 
             }
-        } catch (e) { console.error(e); }
+        } catch (e) {}
     }
-
 
     async function fetchData() {
         try {
             const res = await fetch("/api/supervisor_data");
             const data = await res.json();
-            if (data.error) return;
-            renderInventory(data.inventory);
-            renderRequests(data.requests);
+            if (!data.error) {
+                renderInventory(data.inventory);
+                renderRequests(data.requests);
+            }
         } catch (e) {}
     }
 
@@ -61,7 +75,7 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             const res = await fetch("/api/audit_log");
             const data = await res.json();
-            if (data.logs && data.logs.length > 0) {
+            if (data.logs?.length > 0) {
                 data.logs.forEach(l => {
                     if (!seenLogIds.has(l.id)) {
                         seenLogIds.add(l.id);
@@ -72,13 +86,21 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (e) {}
     }
 
-    // --- RENDER ---
+    function log(message, type="local") {
+        const p = document.createElement("div");
+        p.className = "log-entry";
+        const time = new Date().toLocaleTimeString();
+        let colorClass = "log-local";
+        if (type === "error") colorClass = "log-error";
+        if (type === "server") colorClass = "log-server";
+        p.innerHTML = `<span class="log-time">[${time}]</span><span class="${colorClass}">${message}</span>`;
+        logContainer.prepend(p);
+    }
+
+    // --- RENDER (Unchanged) ---
     function renderInventory(items) {
         inventoryList.innerHTML = "";
-        if (!items || items.length === 0) {
-            inventoryList.innerHTML = "<p>No inventory found.</p>";
-            return;
-        }
+        if (!items?.length) { inventoryList.innerHTML = "<p>No inventory.</p>"; return; }
         items.forEach(item => {
             const div = document.createElement("div");
             div.className = "inventory-item";
@@ -89,7 +111,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     function renderRequests(requests) {
         requestList.innerHTML = "";
-        if (!requests || requests.length === 0) { requestList.innerHTML = "<p>No items require attention.</p>"; return; }
+        if (!requests?.length) { requestList.innerHTML = "<p>No pending requests.</p>"; return; }
         requests.forEach(req => {
             const div = document.createElement("div");
             div.className = "request-item";
@@ -102,25 +124,10 @@ document.addEventListener("DOMContentLoaded", () => {
             requestList.appendChild(div);
         });
     }
-    
 
-    function log(message, type="local") {
-        const p = document.createElement("div");
-        p.className = "log-entry";
-        const time = new Date().toLocaleTimeString();
-        const colorClass = type === "error" ? "log-error" : (type === "server" ? "log-server" : "log-local");
-        p.innerHTML = `<span class="log-time">[${time}]</span><span class="${colorClass}">${message}</span>`;
-        logContainer.prepend(p);
-    }
-
-    // --- EVENTS ---
+    // --- EVENT LISTENERS ---
     refreshBtn.onclick = fetchData;
-    commandSendBtn.onclick = () => {
-        if (commandInput.value) {
-            submitTask({ text: commandInput.value, task_name: `CMD: ${commandInput.value.substring(0, 20)}` });
-            commandInput.value = "";
-        }
-    };
+    commandSendBtn.onclick = () => { if (commandInput.value) { submitTask({ text: commandInput.value, task_name: `CMD: ${commandInput.value.substring(0, 20)}` }); commandInput.value = ""; } };
     commandInput.onkeydown = (e) => { if(e.key==="Enter") commandSendBtn.click(); };
 
     inventoryList.onclick = (e) => {
@@ -133,20 +140,22 @@ document.addEventListener("DOMContentLoaded", () => {
     addItemBtn.onclick = () => addItemModal.classList.remove("hidden");
     document.getElementById("cancelRestock").onclick = () => restockModal.classList.add("hidden");
     document.getElementById("cancelAddItem").onclick = () => addItemModal.classList.add("hidden");
-    
+
+    // 🔥 FIX: Calls Direct Admin API
     document.getElementById("confirmRestock").onclick = () => {
         const qty = document.getElementById("restockQtyInput").value;
         if(qty) {
-            submitTask({ text: `Add ${qty} units to inventory for item '${currentRestockItem}'`, task_name: `Restocking ${currentRestockItem}` });
+            submitAdminAction("/api/admin/restock", { item_name: currentRestockItem, quantity: qty }, `Restocking ${currentRestockItem}`);
             restockModal.classList.add("hidden");
             document.getElementById("restockQtyInput").value = "";
         }
     };
+    // 🔥 FIX: Calls Direct Admin API
     document.getElementById("confirmAddItem").onclick = () => {
         const name = document.getElementById("newItemNameInput").value;
         const qty = document.getElementById("newItemQtyInput").value;
         if(name && qty) {
-            submitTask({ text: `Add new item '${name}' with ${qty} units`, task_name: `Adding ${name}` });
+            submitAdminAction("/api/admin/add_item", { item_name: name, quantity: qty }, `Adding ${name}`);
             addItemModal.classList.add("hidden");
             document.getElementById("newItemNameInput").value = "";
         }
@@ -157,14 +166,9 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!id) return;
         if (e.target.classList.contains("approve-btn")) submitTask({ text: `Approve request ID ${id}`, task_name: `Approving ${id}` });
         if (e.target.classList.contains("reject-btn")) submitTask({ text: `Reject request ID ${id}`, task_name: `Rejecting ${id}` });
-        
-        // 🔥 UPDATED: SEND "FIX IT" COMMAND
         if (e.target.classList.contains("resolve-btn")) {
             const notes = e.target.dataset.notes;
-            // The prompt now COMMANDS the agent to fix the issue, rather than asking for advice.
-            const command = `Fix action item ${id} immediately. Read the notes: '${notes}'. Restock the item with a buffer, send the required amount to the victim, and mark the task as resolved.`;
-            
-            commandInput.value = command;
+            commandInput.value = `Fix action item ${id} immediately. Notes: '${notes}'. Restock buffer, send to victim, mark resolved.`;
             commandInput.focus();
         }
     };

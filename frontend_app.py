@@ -22,25 +22,24 @@ from google.api_core.exceptions import ResourceExhausted, ServiceUnavailable
 
 load_dotenv()
 
-# --- FLASK APP ---
 app = Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(__file__), "relief_logistics.db")
 
-# --- GLOBAL QUEUE & STORAGE ---
+# --- GLOBAL STATE ---
 TASK_QUEUE = queue.Queue()
 JOB_RESULTS = {}
 
-# --- GLOBAL ADK AGENTS ---
+# Store chat history in RAM: { session_id: [ {sender: 'user'|'ai', text: '...'} ] }
+CHAT_STORE = {} 
+
 VICTIM_RUNNER = None
 SUPERVISOR_RUNNER = None
 
 def initialize_adk_agents():
     global VICTIM_RUNNER, SUPERVISOR_RUNNER
-    if "GOOGLE_API_KEY" not in os.environ:
-        raise ValueError("GOOGLE_API_KEY not found.")
+    if "GOOGLE_API_KEY" not in os.environ: raise ValueError("GOOGLE_API_KEY not found.")
 
-    # We rely on our own loop for retries, so we keep internal retries low/fast
-    retry_config = types.HttpRetryOptions(attempts=1, initial_delay=1)
+    retry_config = types.HttpRetryOptions(attempts=3, initial_delay=1, max_delay=10, exp_base=2)
     session_service = InMemorySessionService()
 
     proxy_vic = RemoteA2aAgent(name="relief_manager", description="Hub", agent_card=f"http://localhost:8001{AGENT_CARD_WELL_KNOWN_PATH}")
@@ -65,43 +64,24 @@ def initialize_adk_agents():
     SUPERVISOR_RUNNER = Runner(agent=supervisor_agent, app_name="supervisor_frontend", session_service=session_service)
     print("✅ ADK Agents Initialized.")
 
-# --- SMARTER WORKER ---
-
+# --- WORKER ---
 def calculate_backoff(attempt):
-    """Fallback exponential backoff."""
     delay = min(60, 2 * (2 ** attempt))
     return delay * (0.5 + random.random() / 2)
 
 def extract_retry_delay(error_message):
-    """
-    Parses wait time from Gemini error messages.
-    Supports:
-    1. "retry in 13.72s"
-    2. "'retryDelay': '13s'" (JSON format)
-    """
-    msg = str(error_message)
-    
-    # Check for JSON format first (most common in your logs)
-    json_match = re.search(r"retryDelay': '(\d+(\.\d+)?)s'", msg)
-    if json_match:
-        return float(json_match.group(1))
-        
-    # Check for plain text format
-    text_match = re.search(r"retry in (\d+(\.\d+)?)s", msg)
-    if text_match:
-        return float(text_match.group(1))
-        
+    match = re.search(r"retry in (\d+(\.\d+)?)s", str(error_message))
+    if match: return float(match.group(1))
     return None
 
 def agent_worker():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
-    # Global Throttle
     last_api_call_time = 0
-    MIN_REQUEST_INTERVAL = 6.5 
+    MIN_GAP = 6.0 
 
-    async def run_task_logic(job):
+    async def run_task(job):
+        nonlocal last_api_call_time
         runner = SUPERVISOR_RUNNER if job["persona"] == "supervisor" else VICTIM_RUNNER
         session_id = job.get("session_id", "default_session")
         
@@ -113,101 +93,90 @@ def agent_worker():
                 header, encoded = job["audio"].split(",", 1)
                 audio_bytes = base64.b64decode(encoded)
                 user_message = types.Content(role="user", parts=[types.Part(inline_data=types.Blob(mime_type="audio/webm", data=audio_bytes))])
-            except Exception as e: return f"Audio Error: {e}"
+            except: return "Audio Error"
 
         if not user_message: return "No content"
 
-        try: await runner.session_service.create_session(app_name=runner.app_name, user_id=job["persona"], session_id=session_id)
-        except: pass
+        max_retries = 5
+        for attempt in range(max_retries + 1):
+            elapsed = time.time() - last_api_call_time
+            if elapsed < MIN_GAP: time.sleep(MIN_GAP - elapsed)
 
-        final_response = None
-        async for event in runner.run_async(user_id=job["persona"], session_id=session_id, new_message=user_message):
-            if event.is_final_response() and event.content:
-                final_response = event.content.parts[0].text
-        
-        if final_response:
-            return final_response
-        else:
-            raise Exception("Empty response from agent")
+            try:
+                try: await runner.session_service.create_session(app_name=runner.app_name, user_id=job["persona"], session_id=session_id)
+                except: pass
 
-    print("🤖 Agent Worker started with Smart Re-Queueing.")
-    
+                final_response = None
+                async for event in runner.run_async(user_id=job["persona"], session_id=session_id, new_message=user_message):
+                    if event.is_final_response() and event.content:
+                        final_response = event.content.parts[0].text
+                
+                if final_response:
+                    last_api_call_time = time.time()
+                    return final_response
+                else:
+                    raise Exception("Empty response")
+
+            except Exception as e:
+                error_str = str(e)
+                if "429" in error_str or "RESOURCE" in error_str or "Quota" in error_str:
+                    if attempt < max_retries:
+                        wait = extract_retry_delay(error_str) or calculate_backoff(attempt)
+                        time.sleep(wait + 1)
+                        continue
+                    else: return "System busy (Rate Limit)."
+                elif "503" in error_str:
+                    time.sleep(2)
+                    continue
+                else:
+                    return "Connection Error."
+        return "Timeout."
+
     while True:
         job = TASK_QUEUE.get()
         if job is None: break
         
-        # 1. Rate Limiter (Pre-flight check)
-        time_since = time.time() - last_api_call_time
-        if time_since < MIN_REQUEST_INTERVAL:
-            time.sleep(MIN_REQUEST_INTERVAL - time_since)
-        last_api_call_time = time.time()
-        
+        # Save User Message to History
+        if job["persona"] == "victim":
+            sess_id = job.get("session_id")
+            if sess_id not in CHAT_STORE: CHAT_STORE[sess_id] = []
+            msg_text = job.get("text", "Audio Message")
+            CHAT_STORE[sess_id].append({"sender": "user", "text": msg_text})
+
         client_id = job["client_id"]
-        result_text = ""
-        should_requeue = False
+        res = loop.run_until_complete(run_task(job))
 
-        try:
-            result_text = loop.run_until_complete(run_task_logic(job))
-            
-        except Exception as e:
-            error_str = str(e)
-            
-            # 🔥 CATCH RATE LIMITS
-            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str or "Quota" in error_str:
-                # 1. Get wait time
-                wait_time = extract_retry_delay(error_str)
-                if not wait_time:
-                    # Fallback logic based on retry count in job
-                    attempt = job.get("retry_count", 0)
-                    wait_time = calculate_backoff(attempt)
-                
-                # Add safety buffer
-                wait_time += 1.0
-                
-                print(f"⚠️ Rate Limit Hit! Google says wait {wait_time:.2f}s. Re-queueing...")
-                
-                # 2. Sleep here to prevent tight loop hammering
-                time.sleep(wait_time)
-                
-                # 3. Re-queue logic
-                job["retry_count"] = job.get("retry_count", 0) + 1
-                if job["retry_count"] <= 10: # Max 10 retries
-                    should_requeue = True
-                else:
-                    result_text = "ERROR: System overloaded. Max retries exceeded."
-            
-            elif "503" in error_str:
-                print("⚠️ 503 Error. Sleeping 5s and Re-queueing...")
-                time.sleep(5)
-                job["retry_count"] = job.get("retry_count", 0) + 1
-                should_requeue = True
-            
-            else:
-                print(f"❌ Fatal Error: {error_str}")
-                result_text = "ERROR: Internal System Failure."
+        # Save AI Response to History
+        if job["persona"] == "victim":
+            sess_id = job.get("session_id")
+            CHAT_STORE[sess_id].append({"sender": "ai", "text": res})
 
-        # --- POST PROCESSING ---
-        if should_requeue:
-            # Put back in queue. The frontend will just keep waiting (spinner spinning).
-            TASK_QUEUE.put(job)
-        else:
-            # Success or Fatal Error -> Send result to UI
-            if client_id not in JOB_RESULTS: JOB_RESULTS[client_id] = []
-            JOB_RESULTS[client_id].append({"task_name": job["task_name"], "output": result_text, "persona": job["persona"]})
+        if client_id not in JOB_RESULTS: JOB_RESULTS[client_id] = []
+        JOB_RESULTS[client_id].append({"task_name": job["task_name"], "output": res, "persona": job["persona"]})
 
-# --- FLASK ROUTES ---
+# --- ROUTES ---
 @app.route("/")
 def victim_chat(): return render_template("victim_chat.html")
 @app.route("/supervisor")
 def supervisor_dashboard(): return render_template("supervisor_dashboard.html")
+
 @app.route("/api/submit_task", methods=["POST"])
 def submit_task():
     TASK_QUEUE.put(request.json)
     return jsonify({"status": "queued"})
+
 @app.route("/api/get_results/<client_id>", methods=["GET"])
 def get_results(client_id):
     results = JOB_RESULTS.pop(client_id, [])
     return jsonify({"results": results})
+
+# --- HISTORY ENDPOINT ---
+@app.route("/api/victim_history/<session_id>", methods=["GET"])
+def get_victim_history(session_id):
+    """Returns chat history for a specific session ID."""
+    return jsonify({"history": CHAT_STORE.get(session_id, [])})
+
+# --- SUPERVISOR DATA ---
 @app.route("/api/supervisor_data", methods=["GET"])
 def get_supervisor_data():
     try:
@@ -218,19 +187,73 @@ def get_supervisor_data():
         conn.close()
         return jsonify({"inventory": inventory, "requests": requests})
     except Exception as e: return jsonify({"error": str(e)}), 500
+
 @app.route("/api/audit_log", methods=["GET"])
 def get_audit_log():
     try:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row
+        # Also fetch ADMIN_ACTION logs
         rows = conn.execute("SELECT * FROM requests WHERE status NOT IN ('PENDING', 'ACTION_REQUIRED', 'FLAGGED') ORDER BY id DESC LIMIT 20").fetchall()
         conn.close()
-        logs = [{"id": r["id"], "action": f"{r['status']}: {r['notes'] or 'Processed'} ({r['item_name']} x{r['quantity']})"} for r in rows]
+        logs = []
+        for r in rows:
+            status = r["status"]
+            action = f"{status}: {r['notes'] or 'Processed'} ({r['item_name']} x{r['quantity']})"
+            logs.append({"id": r["id"], "action": action})
         return jsonify({"logs": logs})
     except Exception as e: return jsonify({"error": str(e)}), 500
 
+# --- 🔥 NEW DIRECT ADMIN ROUTES ---
+
+@app.route("/api/admin/restock", methods=["POST"])
+def admin_restock():
+    """Directly updates DB without using the Agent."""
+    data = request.json
+    item = data.get("item_name")
+    qty = int(data.get("quantity", 0))
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        # 1. Update Stock
+        conn.execute("UPDATE inventory SET quantity = quantity + ? WHERE item_name = ?", (qty, item))
+        # 2. Log Action for Audit
+        conn.execute(
+            "INSERT INTO requests (item_name, quantity, location, status, urgency, notes) VALUES (?, ?, ?, ?, ?, ?)",
+            (item, qty, "Warehouse", "ADMIN_ACTION", "NORMAL", f"Manual Restock by Supervisor")
+        )
+        conn.commit()
+        
+        # Fetch new total
+        new_total = conn.execute("SELECT quantity FROM inventory WHERE item_name = ?", (item,)).fetchone()[0]
+        conn.close()
+        return jsonify({"success": True, "message": f"Restocked {item} by {qty}. Total: {new_total}"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/admin/add_item", methods=["POST"])
+def admin_add_item():
+    """Directly adds item to DB without Agent."""
+    data = request.json
+    item = data.get("item_name")
+    qty = int(data.get("quantity", 0))
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        # 1. Add Item
+        conn.execute("INSERT INTO inventory (item_name, quantity) VALUES (?, ?)", (item, qty))
+        # 2. Log
+        conn.execute(
+            "INSERT INTO requests (item_name, quantity, location, status, urgency, notes) VALUES (?, ?, ?, ?, ?, ?)",
+            (item, qty, "Warehouse", "ADMIN_ACTION", "NORMAL", f"New Item Created")
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "message": f"Created item '{item}' with {qty} units."})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 if __name__ == "__main__":
     initialize_adk_agents()
-    worker_thread = threading.Thread(target=agent_worker, daemon=True)
-    worker_thread.start()
+    threading.Thread(target=agent_worker, daemon=True).start()
     app.run(port=5000, debug=True, use_reloader=False)

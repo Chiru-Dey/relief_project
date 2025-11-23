@@ -1,5 +1,4 @@
 document.addEventListener("DOMContentLoaded", () => {
-    // --- Elements ---
     const textarea = document.getElementById('chatInput');
     const sendBtn = document.getElementById('sendBtn');
     const micBtn = document.getElementById('micBtn');
@@ -9,12 +8,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const stopIcon = document.getElementById('stopIcon');
     const MAX_HEIGHT = 200;
 
-    // --- State ---
     let isListening = false;
     const CLIENT_ID = 'vic_' + Math.random().toString(36).substring(2, 9);
-    let sessionId = 'session_' + Date.now();
+    
+    // 🔥 SESSION PERSISTENCE LOGIC
+    let sessionId = sessionStorage.getItem("relief_session_id");
+    if (!sessionId) {
+        sessionId = 'session_' + Date.now();
+        sessionStorage.setItem("relief_session_id", sessionId);
+    }
 
-    // --- Functions ---
     function autoResize() {
         textarea.style.height = 'auto';
         textarea.style.height = `${textarea.scrollHeight}px`;
@@ -28,17 +31,33 @@ document.addEventListener("DOMContentLoaded", () => {
         wrapper.className = `message-wrapper ${sender}`;
         const bubble = document.createElement('div');
         bubble.className = `message-bubble ${sender}`;
-        if (typeof marked !== 'undefined') {
-            bubble.innerHTML = marked.parse(text);
-        } else {
-            bubble.innerHTML = text.replace(/\n/g, '<br>');
-        }
+        // Basic markdown parsing for bold text
+        const formatted = text.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        bubble.innerHTML = formatted;
         wrapper.appendChild(bubble);
         messagesContent.appendChild(wrapper);
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
-    
-    // --- BACKEND COMMUNICATION ---
+
+    // 🔥 LOAD HISTORY ON START
+    async function loadHistory() {
+        try {
+            const res = await fetch(`/api/victim_history/${sessionId}`);
+            const data = await res.json();
+            
+            // Clear existing (except maybe greeting)
+            messagesContent.innerHTML = '';
+            addBubble("Hello! How can I help you today?", "ai");
+
+            if (data.history) {
+                data.history.forEach(msg => {
+                    // msg.sender is 'user' or 'ai'
+                    addBubble(msg.text, msg.sender === 'user' ? 'user' : 'ai');
+                });
+            }
+        } catch (e) { console.error("History load failed", e); }
+    }
+
     async function submitTask(payload) {
         const taskName = payload.text ? `Text: ${payload.text.substring(0, 15)}...` : "Audio Message";
         showLoading();
@@ -47,17 +66,11 @@ document.addEventListener("DOMContentLoaded", () => {
             await fetch('/api/submit_task', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    ...payload, 
-                    client_id: CLIENT_ID, 
-                    session_id: sessionId, 
-                    task_name: taskName, 
-                    persona: "victim" 
-                })
+                body: JSON.stringify({ ...payload, client_id: CLIENT_ID, session_id: sessionId, task_name: taskName, persona: "victim" })
             });
         } catch (error) {
             hideLoading();
-            addBubble("Error: Could not connect to the agent backend.", 'ai');
+            addBubble("Error connecting.", 'ai');
         }
     }
     
@@ -68,15 +81,10 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.results && data.results.length > 0) {
                 hideLoading();
                 data.results.forEach(result => {
-                    // Only show victim-relevant responses
-                    if (result.persona === 'victim') {
-                        addBubble(result.output, 'ai');
-                    }
+                    if (result.persona === 'victim') addBubble(result.output, 'ai');
                 });
             }
-        } catch (e) {
-            console.error("Polling error:", e);
-        }
+        } catch (e) { console.error(e); }
     }
 
     let loadingDivId = null;
@@ -90,7 +98,6 @@ document.addEventListener("DOMContentLoaded", () => {
         messagesContent.appendChild(loader);
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
-    
     function hideLoading() {
         if(loadingDivId) {
             const loader = document.getElementById(loadingDivId);
@@ -99,10 +106,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
     
-    // --- Event Handlers ---
     function handleSendText() {
         const text = textarea.value.trim();
         if (!text) return;
+        // UI update handled by loadHistory logic if we want strict sync, 
+        // but for responsiveness we add locally too.
         addBubble(text, 'user');
         textarea.value = ''; autoResize();
         submitTask({ text: text });
@@ -111,21 +119,9 @@ document.addEventListener("DOMContentLoaded", () => {
     let mediaRecorder, audioChunks = [];
     async function handleToggleMic() {
         isListening = !isListening;
-        
-        // Toggle Icons
-        if (isListening) {
-            micIcon.classList.remove('block');
-            micIcon.classList.add('hidden');
-            stopIcon.classList.remove('hidden');
-            stopIcon.classList.add('block');
-            micBtn.classList.add('listening');
-        } else {
-            stopIcon.classList.remove('block');
-            stopIcon.classList.add('hidden');
-            micIcon.classList.remove('hidden');
-            micIcon.classList.add('block');
-            micBtn.classList.remove('listening');
-        }
+        micBtn.classList.toggle('listening', isListening);
+        micIcon.classList.toggle('hidden', !isListening);
+        stopIcon.classList.toggle('hidden', isListening);
         
         if (isListening) {
             try {
@@ -143,27 +139,19 @@ document.addEventListener("DOMContentLoaded", () => {
                     };
                 };
                 mediaRecorder.start();
-            } catch (err) { 
-                console.error("Mic Error:", err); 
-                isListening = false;
-                // Reset UI on error
-                stopIcon.classList.add('hidden');
-                micIcon.classList.remove('hidden');
-                micBtn.classList.remove('listening');
-            }
+            } catch (err) { console.error(err); isListening = false; handleToggleMic(); }
         } else {
-            if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+            if (mediaRecorder) mediaRecorder.stop();
         }
     }
 
-    // --- Event Listeners ---
     textarea.addEventListener('input', autoResize);
     textarea.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendText(); } });
     sendBtn.addEventListener('click', handleSendText);
     micBtn.addEventListener('click', handleToggleMic);
     
-    // --- Init ---
-    addBubble("Hello! How can I help you today?", "ai");
+    // Init
     autoResize();
+    loadHistory(); // 🔥 Load previous chat on startup
     setInterval(pollResults, 1000);
 });
