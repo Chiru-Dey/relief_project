@@ -16,10 +16,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- API CALLS ---
     async function submitTask(payload) {
         const queuedMsg = `⏳ Queued: ${payload.task_name}`;
+        const logKey = `queued_${Date.now()}_${payload.task_name}`;
+        seenLogIds.add(logKey); // Mark as seen to prevent duplicate from backend
         log(queuedMsg, "queued");
         
-        // Log to activity log
-        logToActivityLog(queuedMsg, "info");
+        // DON'T log to backend here - it will be logged when the command executes
         
         try {
             await fetch("/api/submit_task", {
@@ -33,8 +34,10 @@ document.addEventListener("DOMContentLoaded", () => {
     // 🔥 NEW: Direct Admin Call
     async function submitAdminAction(url, payload, actionName) {
         const processingMsg = `⚙️ Processing: ${actionName}...`;
+        const logKey = `admin_${actionName}_${Date.now()}`;
+        seenLogIds.add(logKey); // Prevent duplicate
         log(processingMsg, "queued");
-        logToActivityLog(processingMsg, "info");
+        // DON'T log to backend - backend will log itself
         
         try {
             const res = await fetch(url, {
@@ -44,11 +47,10 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             const data = await res.json();
             if (data.success) {
-                const successMsg = `✅ Success: ${data.message}`;
-                log(successMsg, "server");
-                // Admin actions are already logged by backend, no need to duplicate
+                // DON'T log success locally - it will come from backend via fetchActivityLog
+                // Just refresh the data
                 fetchData(); // Refresh UI immediately
-                fetchAuditLog(); // Refresh logs
+                fetchActivityLog(); // Fetch new logs from backend
             } else {
                 const errorMsg = `❌ Error: ${data.error}`;
                 log(errorMsg, "error");
@@ -66,16 +68,10 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await fetch(`/api/get_results/${CLIENT_ID}`);
             const data = await res.json();
             if (data.results?.length > 0) {
-                data.results.forEach(r => {
-                     // Simple error check
-                     const type = r.output.includes("ERROR") ? "error" : "response";
-                     const responseMsg = `✅ ${r.task_name}: ${r.output}`;
-                     log(responseMsg, type);
-                     
-                     // Log to activity log
-                     logToActivityLog(responseMsg, type === "error" ? "error" : "success");
-                });
-                fetchData(); 
+                // Just refresh data, don't log locally - backend already logged
+                // The logs will appear via fetchActivityLog()
+                fetchData();
+                fetchActivityLog(); // Fetch the new logs from backend
             }
         } catch (e) {}
     }
@@ -111,16 +107,25 @@ document.addEventListener("DOMContentLoaded", () => {
             const res = await fetch("/api/supervisor_activity_log");
             const data = await res.json();
             if (data.logs?.length > 0) {
-                // Display all activity logs (they're already timestamped)
+                // Display backend logs (admin actions, system events, command responses)
                 data.logs.forEach(l => {
-                    const logKey = `${l.timestamp}_${l.action}`;
+                    // Create a unique key based on timestamp and action content
+                    const logKey = `backend_${l.timestamp}_${l.action.substring(0, 100)}`;
                     if (!seenLogIds.has(logKey)) {
                         seenLogIds.add(logKey);
-                        // Map log type to display type
-                        let displayType = "server";
-                        if (l.type === "error") displayType = "error";
-                        else if (l.type === "success") displayType = "server";
-                        else if (l.type === "system") displayType = "server";
+                        // Map backend log type to frontend display type with proper colors
+                        let displayType = "response"; // Default blue for command responses
+                        if (l.type === "error") {
+                            displayType = "error"; // Red for errors
+                        } else if (l.type === "success") {
+                            displayType = "server"; // Green for success
+                        } else if (l.type === "system") {
+                            displayType = "response"; // Blue for system events
+                        } else if (l.type === "info") {
+                            displayType = "response"; // Blue for info/command responses
+                        } else if (l.type === "warning") {
+                            displayType = "queued"; // Yellow for warnings
+                        }
                         // Don't add timestamp here since log() function adds its own
                         log(l.action, displayType);
                     }
@@ -183,7 +188,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- EVENT LISTENERS ---
     refreshBtn.onclick = fetchData;
-    commandSendBtn.onclick = () => { if (commandInput.value) { submitTask({ text: `[[SOURCE: SUPERVISOR]] ${commandInput.value}`, task_name: `CMD: ${commandInput.value.substring(0, 20)}` }); commandInput.value = ""; } };
+    commandSendBtn.onclick = () => { if (commandInput.value) { submitTask({ text: `[[SOURCE: SUPERVISOR]] ${commandInput.value}`, task_name: `CMD: ${commandInput.value}` }); commandInput.value = ""; } };
     commandInput.onkeydown = (e) => { if(e.key==="Enter") commandSendBtn.click(); };
 
     inventoryList.onclick = (e) => {
@@ -224,23 +229,20 @@ document.addEventListener("DOMContentLoaded", () => {
         if (e.target.classList.contains("reject-btn")) submitTask({ text: `[[SOURCE: SUPERVISOR]] Reject request ID ${id}`, task_name: `Rejecting ${id}` });
         if (e.target.classList.contains("resolve-btn")) {
             // Directly call the resolve API
-            log(`⏳ Resolving action item ${id}...`, "queued");
-            logToActivityLog(`⏳ Resolving action item ${id}...`, "info");
+            const resolveMsg = `⏳ Resolving action item ${id}...`;
+            const logKey = `resolve_${id}_${Date.now()}`;
+            seenLogIds.add(logKey); // Prevent duplicate
+            log(resolveMsg, "queued");
+            // DON'T log to backend - backend will log itself
             
             fetch(`/api/admin/resolve/${id}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" }
             }).then(res => res.json()).then(data => {
                 if (data.success) {
-                    log(`✅ ${data.message}`, "server");
-                    logToActivityLog(data.message, "success");
-                    if (data.dispatches && data.dispatches.length > 0) {
-                        data.dispatches.forEach(d => {
-                            log(`  ${d}`, "server");
-                            logToActivityLog(d, "system");
-                        });
-                    }
+                    // DON'T log success locally - it will come from backend via fetchActivityLog
                     fetchData(); // Refresh
+                    fetchActivityLog(); // Fetch new logs from backend
                 } else {
                     log(`❌ Resolve failed: ${data.error}`, "error");
                     logToActivityLog(`Resolve failed: ${data.error}`, "error");

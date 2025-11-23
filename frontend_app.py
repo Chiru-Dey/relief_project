@@ -195,8 +195,9 @@ def agent_worker():
                 sess_id = job.get("session_id")
                 CHAT_STORE[sess_id].append({"sender": "ai", "text": res})
             elif job["persona"] == "supervisor":
-                # Log supervisor command to activity log
-                log_supervisor_activity(f"Command executed: {job.get('text', job['task_name'])}", "info")
+                # Log supervisor command response to activity log
+                response_msg = f"✅ {job['task_name']}: {res}"
+                log_supervisor_activity(response_msg, "info" if "ERROR" not in res else "error")
 
             if client_id not in JOB_RESULTS: JOB_RESULTS[client_id] = []
             JOB_RESULTS[client_id].append({"task_name": job["task_name"], "output": res, "persona": job["persona"]})
@@ -317,8 +318,8 @@ def log_supervisor_activity(action: str, log_type: str = "info"):
         "action": action,
         "type": log_type
     })
-    # Keep only last 100 entries to prevent memory bloat
-    if len(SUPERVISOR_ACTIVITY_LOG) > 100:
+    # Keep only last 200 entries to prevent memory bloat
+    if len(SUPERVISOR_ACTIVITY_LOG) > 200:
         SUPERVISOR_ACTIVITY_LOG.pop(0)
 
 # --- 🔥 NEW DIRECT ADMIN ROUTES ---
@@ -334,18 +335,13 @@ def admin_restock():
         conn = sqlite3.connect(DB_PATH)
         # 1. Update Stock
         conn.execute("UPDATE inventory SET quantity = quantity + ? WHERE item_name = ?", (qty, item))
-        # 2. Log Action for Audit (still in DB for record-keeping)
-        conn.execute(
-            "INSERT INTO requests (item_name, quantity, location, status, urgency, notes) VALUES (?, ?, ?, ?, ?, ?)",
-            (item, qty, "Warehouse", "ADMIN_ACTION", "NORMAL", f"Manual Restock by Supervisor")
-        )
         conn.commit()
         
         # Fetch new total
         new_total = conn.execute("SELECT quantity FROM inventory WHERE item_name = ?", (item,)).fetchone()[0]
         conn.close()
         
-        # Log to supervisor activity log
+        # Log to supervisor activity log (in-memory dictionary, not DB)
         log_supervisor_activity(f"ADMIN_ACTION: Restocked {item} by {qty}. Total: {new_total}", "success")
         
         # 3. Process any pending dispatch requests for this item
@@ -377,15 +373,10 @@ def admin_add_item():
         conn = sqlite3.connect(DB_PATH)
         # 1. Add Item
         conn.execute("INSERT INTO inventory (item_name, quantity) VALUES (?, ?)", (item, qty))
-        # 2. Log (still in DB for record-keeping)
-        conn.execute(
-            "INSERT INTO requests (item_name, quantity, location, status, urgency, notes) VALUES (?, ?, ?, ?, ?, ?)",
-            (item, qty, "Warehouse", "ADMIN_ACTION", "NORMAL", f"New Item Created")
-        )
         conn.commit()
         conn.close()
         
-        # Log to supervisor activity log
+        # Log to supervisor activity log (in-memory dictionary, not DB)
         log_supervisor_activity(f"ADMIN_ACTION: Created item '{item}' with {qty} units", "success")
         
         return jsonify({"success": True, "message": f"Created item '{item}' with {qty} units."})

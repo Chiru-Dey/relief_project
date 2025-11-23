@@ -32,6 +32,14 @@ def init_db():
                     location TEXT,
                     timestamp INTEGER
                 )''')
+    
+    # Activity logs table for supervisor activity history
+    c.execute('''CREATE TABLE IF NOT EXISTS activity_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    action TEXT,
+                    type TEXT
+                )''')
     conn.commit()
     
     # Seed Data
@@ -180,5 +188,32 @@ def create_system_log(notes: str):
     cursor = conn.cursor()
     cursor.execute("INSERT INTO requests (item_name, quantity, location, status, urgency, notes) VALUES (?, ?, ?, ?, ?, ?)", 
                    ("SYSTEM_NOTE", 0, "N/A", "FLAGGED", "NORMAL", notes))
+    conn.commit()
+    conn.close()
+
+# --- ACTIVITY LOGS ---
+def add_activity_log(action: str, log_type: str = "info"):
+    """Add a persistent activity log entry to the database."""
+    import datetime
+    conn = get_db_connection()
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("INSERT INTO activity_logs (timestamp, action, type) VALUES (?, ?, ?)", 
+                 (timestamp, action, log_type))
+    conn.commit()
+    conn.close()
+
+def get_activity_logs(limit: int = 100):
+    """Retrieve recent activity logs from the database."""
+    conn = get_db_connection()
+    rows = conn.execute("SELECT * FROM activity_logs ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def clear_old_activity_logs(days: int = 7):
+    """Remove activity logs older than specified days."""
+    import datetime
+    conn = get_db_connection()
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("DELETE FROM activity_logs WHERE timestamp < ?", (cutoff,))
     conn.commit()
     conn.close()
