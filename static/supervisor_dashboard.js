@@ -183,7 +183,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- EVENT LISTENERS ---
     refreshBtn.onclick = fetchData;
-    commandSendBtn.onclick = () => { if (commandInput.value) { submitTask({ text: commandInput.value, task_name: `CMD: ${commandInput.value.substring(0, 20)}` }); commandInput.value = ""; } };
+    commandSendBtn.onclick = () => { if (commandInput.value) { submitTask({ text: `[[SOURCE: SUPERVISOR]] ${commandInput.value}`, task_name: `CMD: ${commandInput.value.substring(0, 20)}` }); commandInput.value = ""; } };
     commandInput.onkeydown = (e) => { if(e.key==="Enter") commandSendBtn.click(); };
 
     inventoryList.onclick = (e) => {
@@ -220,8 +220,8 @@ document.addEventListener("DOMContentLoaded", () => {
     requestList.onclick = (e) => {
         const id = e.target.dataset.id;
         if (!id) return;
-        if (e.target.classList.contains("approve-btn")) submitTask({ text: `Approve request ID ${id}`, task_name: `Approving ${id}` });
-        if (e.target.classList.contains("reject-btn")) submitTask({ text: `Reject request ID ${id}`, task_name: `Rejecting ${id}` });
+        if (e.target.classList.contains("approve-btn")) submitTask({ text: `[[SOURCE: SUPERVISOR]] Approve request ID ${id}`, task_name: `Approving ${id}` });
+        if (e.target.classList.contains("reject-btn")) submitTask({ text: `[[SOURCE: SUPERVISOR]] Reject request ID ${id}`, task_name: `Rejecting ${id}` });
         if (e.target.classList.contains("resolve-btn")) {
             // Directly call the resolve API
             log(`⏳ Resolving action item ${id}...`, "queued");

@@ -1,5 +1,44 @@
 import database
 import json
+from difflib import get_close_matches
+
+def normalize_item_name_fuzzy(item_name: str) -> tuple[str, bool]:
+    """
+    Normalize item name with fuzzy matching for supervisor operations.
+    
+    Returns: (normalized_name, found_match)
+    - normalized_name: The matched database key or normalized input
+    - found_match: True if item exists in database, False otherwise
+    
+    Examples:
+    - "water bottles" → ("water_bottles", True)
+    - "water bootle" → ("water_bottles", True) - typo correction
+    - "Medical Kits" → ("medical_kits", True)
+    - "unknown_item" → ("unknown_item", False)
+    """
+    # Step 1: Basic normalization
+    normalized = item_name.lower().replace(" ", "_").replace("-", "_")
+    
+    # Step 2: Get all valid items from database
+    valid_items = database.get_all_item_names()
+    
+    # Step 3: Check for exact match
+    if normalized in valid_items:
+        return (normalized, True)
+    
+    # Step 4: Try fuzzy matching
+    normalized_valid = [item.replace(" ", "_").replace("-", "_") for item in valid_items]
+    matches = get_close_matches(normalized, normalized_valid, n=1, cutoff=0.6)
+    
+    if matches:
+        # Find the original database key
+        matched_normalized = matches[0]
+        for i, norm_item in enumerate(normalized_valid):
+            if norm_item == matched_normalized:
+                return (valid_items[i], True)
+    
+    # Step 5: No match found
+    return (normalized, False)
 
 # ... (Previous tools remain the same: view_pending, decide_request, batch_decide, add, delete, restock) ...
 def supervisor_view_pending_requests() -> str:
@@ -103,18 +142,40 @@ def supervisor_batch_decide_requests(request_ids_json: str, decision: str) -> st
     return "\n".join([supervisor_decide_request(i, decision) for i in ids])
 
 def admin_add_new_item(item_name: str, initial_quantity: int) -> str:
-    if database.get_item_stock(item_name) != -1: return "Error: Item exists."
-    database.add_new_item(item_name, initial_quantity)
-    return f"SUCCESS: Added {item_name}."
+    # Use fuzzy matching to check if item already exists
+    normalized_name, exists = normalize_item_name_fuzzy(item_name)
+    
+    if exists:
+        return f"ERROR: Item '{normalized_name}' already exists in inventory. Use restock instead. (Did you mean to restock '{normalized_name}'?)"
+    
+    # For new items, just use basic normalization (no fuzzy match needed)
+    new_item_name = item_name.lower().replace(" ", "_").replace("-", "_")
+    database.add_new_item(new_item_name, initial_quantity)
+    return f"SUCCESS: Added '{new_item_name}' with {initial_quantity} units."
 
 def admin_delete_item(item_name: str) -> str:
-    database.delete_item(item_name)
-    return f"SUCCESS: Deleted {item_name}."
+    # Use fuzzy matching to find the item
+    normalized_name, exists = normalize_item_name_fuzzy(item_name)
+    
+    if not exists:
+        # Provide helpful suggestions
+        all_items = database.get_all_item_names()
+        return f"ERROR: Item '{item_name}' not found in inventory. Cannot delete. Available items: {', '.join(all_items[:5])}..."
+    
+    database.delete_item(normalized_name)
+    return f"SUCCESS: Deleted '{normalized_name}' from inventory."
 
 def admin_restock_item(item_name: str, quantity_to_add: int) -> str:
-    if database.get_item_stock(item_name) == -1: return "Error: Item not found."
-    total = database.increment_stock(item_name, quantity_to_add)
-    return f"SUCCESS: Added {quantity_to_add} to {item_name}. Total: {total}."
+    # Use fuzzy matching to find the item
+    normalized_name, exists = normalize_item_name_fuzzy(item_name)
+    
+    if not exists:
+        # Provide helpful suggestions
+        all_items = database.get_all_item_names()
+        return f"ERROR: Item '{item_name}' not found in inventory. Cannot restock. Available items: {', '.join(all_items[:5])}... (Did you mean one of these?)"
+    
+    total = database.increment_stock(normalized_name, quantity_to_add)
+    return f"SUCCESS: Added {quantity_to_add} to '{normalized_name}'. Total: {total}."
 
 # 🔥 FIXED: ROBUST JSON PARSING
 def admin_batch_update_inventory(updates_json: str) -> str:

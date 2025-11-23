@@ -113,7 +113,7 @@ document.addEventListener("DOMContentLoaded", () => {
         // but for responsiveness we add locally too.
         addBubble(text, 'user');
         textarea.value = ''; autoResize();
-        submitTask({ text: text });
+        submitTask({ text: `[[SOURCE: VICTIM]] ${text}` });
     }
     
     let mediaRecorder, audioChunks = [];
