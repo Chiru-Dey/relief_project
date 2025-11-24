@@ -39,6 +39,8 @@ document.addEventListener("DOMContentLoaded", () => {
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
     }
 
+    let lastMessageCount = 0;
+    
     // 🔥 LOAD HISTORY ON START
     async function loadHistory() {
         try {
@@ -54,8 +56,26 @@ document.addEventListener("DOMContentLoaded", () => {
                     // msg.sender is 'user' or 'ai'
                     addBubble(msg.text, msg.sender === 'user' ? 'user' : 'ai');
                 });
+                lastMessageCount = data.history.length;
             }
         } catch (e) { console.error("History load failed", e); }
+    }
+    
+    // 🔥 POLL FOR NEW MESSAGES (from supervisor notifications)
+    async function pollForNewMessages() {
+        try {
+            const res = await fetch(`/api/victim_history/${sessionId}`);
+            const data = await res.json();
+            
+            if (data.history && data.history.length > lastMessageCount) {
+                // New messages arrived - add only the new ones
+                const newMessages = data.history.slice(lastMessageCount);
+                newMessages.forEach(msg => {
+                    addBubble(msg.text, msg.sender === 'user' ? 'user' : 'ai');
+                });
+                lastMessageCount = data.history.length;
+            }
+        } catch (e) { console.error("Poll failed", e); }
     }
 
     async function submitTask(payload) {
@@ -153,5 +173,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // Init
     autoResize();
     loadHistory(); // 🔥 Load previous chat on startup
-    setInterval(pollResults, 1000);
+    setInterval(pollResults, 1000); // Poll for AI responses to user's own messages
+    setInterval(pollForNewMessages, 2000); // Poll for supervisor notifications
 });
