@@ -68,8 +68,9 @@ def supervisor_resolve_action_required(task_id: int, buffer_multiplier: float = 
     if not task: 
         return f"Error: Task {task_id} not found."
     
-    if task['status'] != 'ACTION_REQUIRED':
-        return f"Error: Task {task_id} is not ACTION_REQUIRED (current status: {task['status']})."
+    # Accept both ACTION_REQUIRED and PENDING_DISPATCH statuses
+    if task['status'] not in ['ACTION_REQUIRED', 'PENDING_DISPATCH', 'PARTIAL']:
+        return f"Error: Task {task_id} cannot be resolved (current status: {task['status']}). Only ACTION_REQUIRED, PENDING_DISPATCH, or PARTIAL requests can be resolved."
     
     item_name = task['item_name']
     quantity_needed = task['quantity']

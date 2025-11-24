@@ -176,10 +176,18 @@ document.addEventListener("DOMContentLoaded", () => {
         requests.forEach(req => {
             const div = document.createElement("div");
             div.className = "request-item";
+            
             if (req.status === 'ACTION_REQUIRED') {
+                // Critical action needed - yellow border
                 div.style.borderColor = "#FBBF24";
-                div.innerHTML = `<div class="request-details"><strong>❗ ACTION (ID ${req.id}):</strong> ${req.notes}<br><small>${req.location}</small></div><div class="request-actions"><button class="resolve-btn" data-id="${req.id}" data-notes="${req.notes}" style="background-color:#10B981;">Resolve</button></div>`;
+                div.innerHTML = `<div class="request-details"><strong>❗ ACTION REQUIRED (ID ${req.id}):</strong> ${req.notes}<br><small>${req.location}</small></div><div class="request-actions"><button class="resolve-btn" data-id="${req.id}" data-notes="${req.notes}" style="background-color:#10B981;">Resolve</button></div>`;
+            } else if (req.status === 'PENDING_DISPATCH' || req.status === 'PARTIAL') {
+                // Waiting for restock - blue/cyan border, needs resolve action
+                div.style.borderColor = "#3B82F6";
+                const displayText = req.notes || `${req.quantity}x ${req.item_name.replace(/_/g, ' ')} for ${req.location}`;
+                div.innerHTML = `<div class="request-details"><strong>⏳ ${req.status} (ID ${req.id}):</strong> ${displayText}<br><small>Click Resolve to restock & dispatch</small></div><div class="request-actions"><button class="resolve-btn" data-id="${req.id}" data-notes="${displayText}" style="background-color:#3B82F6;">Resolve</button></div>`;
             } else {
+                // Regular pending - default styling
                 div.innerHTML = `<div class="request-details"><strong>⏳ PENDING (ID ${req.id}):</strong> ${req.quantity}x ${req.item_name.replace(/_/g, ' ')} for ${req.location}</div><div class="request-actions"><button class="approve-btn" data-id="${req.id}">Approve</button><button class="reject-btn" data-id="${req.id}" style="background-color:#DC2626;">Reject</button></div>`;
             }
             requestList.appendChild(div);
