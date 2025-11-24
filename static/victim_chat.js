@@ -73,7 +73,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 // New messages arrived - add only the new ones
                 const newMessages = data.history.slice(lastMessageCount);
                 newMessages.forEach(msg => {
-                    const msgKey = `history_${msg.sender}_${msg.text.substring(0, 50)}`;
+                    // Use consistent key format with pollResults (based on message content)
+                    const msgKey = msg.sender === 'user' ? `user_${msg.text.substring(0, 50)}` : `ai_${msg.text.substring(0, 50)}`;
                     // Only display if not already shown by pollResults
                     if (!displayedMessages.has(msgKey) && msg.sender !== 'user') {
                         displayedMessages.add(msgKey);
@@ -111,10 +112,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 hideLoading();
                 data.results.forEach(result => {
                     if (result.persona === 'victim') {
-                        const msgKey = `result_${result.task_name}_${result.output.substring(0, 50)}`;
+                        // Use consistent key format with pollForNewMessages
+                        const msgKey = `ai_${result.output.substring(0, 50)}`;
                         if (!displayedMessages.has(msgKey)) {
                             displayedMessages.add(msgKey);
                             addBubble(result.output, 'ai');
+                            lastMessageCount++; // Increment so pollForNewMessages doesn't show it again
                         }
                     }
                 });
