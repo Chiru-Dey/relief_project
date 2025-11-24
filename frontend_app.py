@@ -164,7 +164,9 @@ def agent_worker():
             sess_id = job.get("session_id")
             if sess_id not in CHAT_STORE: CHAT_STORE[sess_id] = []
             msg_text = job.get("text", "Audio Message")
-            CHAT_STORE[sess_id].append({"sender": "user", "text": msg_text})
+            # Strip SOURCE tags before saving to history (for clean display)
+            msg_text_clean = msg_text.replace("[[SOURCE: VICTIM]] ", "").replace("[[SOURCE: VICTIM]]", "")
+            CHAT_STORE[sess_id].append({"sender": "user", "text": msg_text_clean})
             user_msg_added = True
             
             # Set session context for tools to use

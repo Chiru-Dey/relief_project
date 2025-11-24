@@ -129,10 +129,10 @@ document.addEventListener("DOMContentLoaded", () => {
     function handleSendText() {
         const text = textarea.value.trim();
         if (!text) return;
-        // UI update handled by loadHistory logic if we want strict sync, 
-        // but for responsiveness we add locally too.
+        // Display original text (without source tag) in UI
         addBubble(text, 'user');
         textarea.value = ''; autoResize();
+        // Send with source tag for backend routing (not visible to user)
         submitTask({ text: `[[SOURCE: VICTIM]] ${text}` });
     }
     
