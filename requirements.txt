@@ -4,3 +4,4 @@ python-dotenv
 fastapi
 flask[async]
 requests
+honcho

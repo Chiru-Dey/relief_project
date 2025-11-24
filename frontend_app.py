@@ -429,6 +429,11 @@ def admin_resolve(request_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == "__main__":
+    import os
     initialize_adk_agents()
     threading.Thread(target=agent_worker, daemon=True).start()
-    app.run(port=5000, debug=True, use_reloader=False)
+    # Render assigns PORT environment variable for web services
+    port = int(os.environ.get("PORT", 5000))
+    debug_mode = os.environ.get("FLASK_ENV") != "production"
+    print(f"✅ Client Proxies Ready. Starting on port {port}")
+    app.run(host="0.0.0.0", port=port, debug=debug_mode, use_reloader=False)

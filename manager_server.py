@@ -31,10 +31,13 @@ if "GOOGLE_API_KEY" not in os.environ:
 app = to_a2a(manager_orchestrator, port=8001)
 
 if __name__ == "__main__":
-    print("🚀 Starting Hierarchical Multi-Agent Backend Server on Port 8001...")
+    import os
+    backend_port = int(os.environ.get("BACKEND_PORT", 8001))
+    print(f"🚀 Starting Hierarchical Multi-Agent Backend Server on Port {backend_port}...")
     print("   - Database Initialized")
     print("   - Agents Loaded")
-    print("   - A2A Endpoint: http://localhost:8001")
+    print(f"   - A2A Endpoint: http://0.0.0.0:{backend_port}")
     
-    # reload=True allows the server to restart if you modify agent code
-    uvicorn.run("manager_server:app", host="0.0.0.0", port=8001, reload=True)
+    # reload=False for production (Render doesn't support reload)
+    reload_mode = os.environ.get("FLASK_ENV") != "production"
+    uvicorn.run("manager_server:app", host="0.0.0.0", port=backend_port, reload=reload_mode)
