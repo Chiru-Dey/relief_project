@@ -5,7 +5,11 @@ import threading
 from typing import Optional
 
 # Frontend server URL for logging supervisor activities
-FRONTEND_URL = "http://localhost:5000"
+# On Render with Honcho, both processes run in the same container so localhost works
+# But we need to use the correct port (Render assigns PORT env var to frontend)
+import os
+FRONTEND_PORT = os.environ.get("PORT", "5000")
+FRONTEND_URL = f"http://localhost:{FRONTEND_PORT}"
 
 # Global variable to store current session ID (set by agent runner)
 CURRENT_SESSION_ID = None

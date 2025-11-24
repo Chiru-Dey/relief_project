@@ -176,6 +176,7 @@ def agent_worker():
             # Store session in database so tools can look it up
             import database
             database.register_active_session(sess_id, location="ACTIVE")
+            print(f"[FRONTEND] 🔍 Registered session {sess_id} as ACTIVE")
             
             # Session ID is now stored directly in requests when created
             # No need for location-based session mapping anymore
