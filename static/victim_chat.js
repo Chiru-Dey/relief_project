@@ -101,7 +101,10 @@ document.addEventListener("DOMContentLoaded", () => {
             if (data.results && data.results.length > 0) {
                 hideLoading();
                 data.results.forEach(result => {
-                    if (result.persona === 'victim') addBubble(result.output, 'ai');
+                    if (result.persona === 'victim') {
+                        addBubble(result.output, 'ai');
+                        lastMessageCount++; // Increment to prevent duplicate from pollForNewMessages
+                    }
                 });
             }
         } catch (e) { console.error(e); }
@@ -129,8 +132,9 @@ document.addEventListener("DOMContentLoaded", () => {
     function handleSendText() {
         const text = textarea.value.trim();
         if (!text) return;
-        // Display original text (without source tag) in UI
+        // Display user message immediately (better UX)
         addBubble(text, 'user');
+        lastMessageCount++; // Increment to prevent duplicate from pollForNewMessages
         textarea.value = ''; autoResize();
         // Send with source tag for backend routing (not visible to user)
         submitTask({ text: `[[SOURCE: VICTIM]] ${text}` });
