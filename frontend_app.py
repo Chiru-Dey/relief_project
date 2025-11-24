@@ -173,8 +173,9 @@ def agent_worker():
             CHAT_STORE[sess_id].append({"sender": "user", "text": msg_text_clean})
             user_msg_added = True
             
-            # Session is now stored in database via register_active_session
-            # Tools will look it up from database when needed
+            # Store session in database so tools can look it up
+            import database
+            database.register_active_session(sess_id, location="ACTIVE")
             
             # Session ID is now stored directly in requests when created
             # No need for location-based session mapping anymore
@@ -212,14 +213,9 @@ def agent_worker():
 # --- ROUTES ---
 @app.route("/")
 def victim_chat():
-    import uuid
-    import database
-    # Generate session_id and store as "current active session" in database
-    session_id = f"session_{uuid.uuid4().hex[:12]}"
-    # Store with special marker "CURRENT" so backend can retrieve the most recent session
-    database.register_active_session(session_id, location="CURRENT")
-    print(f"🔍 DEBUG: Created new session: {session_id}")
-    return render_template("victim_chat.html", session_id=session_id)
+    # Don't generate session_id on server - let JavaScript handle it
+    # This allows sessionStorage to preserve the session across page reloads
+    return render_template("victim_chat.html", session_id=None)
 @app.route("/supervisor")
 def supervisor_dashboard(): return render_template("supervisor_dashboard.html")
 

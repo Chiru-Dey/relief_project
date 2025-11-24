@@ -257,17 +257,20 @@ def request_relief(item_name: str, quantity: int, location: str, is_critical: bo
     normalized_name = normalize_item_name(item_name)
     current_stock = database.get_item_stock(normalized_name)
     
-    # Get session ID from database - look for the most recent CURRENT session
+    # Get the most recent ACTIVE session and update it with the location
     import sqlite3
     conn = sqlite3.connect('relief_logistics.db')
     cursor = conn.cursor()
-    cursor.execute('SELECT session_id FROM active_sessions WHERE location = "CURRENT" ORDER BY timestamp DESC LIMIT 1')
+    
+    # Get the most recent session marked as ACTIVE
+    cursor.execute('SELECT session_id FROM active_sessions WHERE location = "ACTIVE" ORDER BY timestamp DESC LIMIT 1')
     row = cursor.fetchone()
     session_id = row[0] if row else None
     
-    # Update this session with the actual location now that we know it
+    # Update this session with the actual location for future lookups
     if session_id:
         database.register_active_session(session_id, location)
+        print(f"🔍 DEBUG: Updated session {session_id} with location: {location}")
     
     conn.close()
     print(f"🔍 DEBUG: request_relief - location: {location}, session_id: {session_id}")
