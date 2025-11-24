@@ -219,6 +219,26 @@ def victim_chat():
 @app.route("/supervisor")
 def supervisor_dashboard(): return render_template("supervisor_dashboard.html")
 
+@app.route("/debug")
+def debug_page():
+    """Debug page to view all database tables"""
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    
+    # Get inventory
+    inventory = [dict(row) for row in conn.execute("SELECT * FROM inventory ORDER BY item_name").fetchall()]
+    
+    # Get requests
+    requests = [dict(row) for row in conn.execute("SELECT * FROM requests ORDER BY id DESC").fetchall()]
+    
+    # Get active sessions
+    sessions = [dict(row) for row in conn.execute("SELECT * FROM active_sessions ORDER BY timestamp DESC").fetchall()]
+    
+    conn.close()
+    
+    return render_template("debug.html", inventory=inventory, requests=requests, sessions=sessions)
+
 @app.route("/api/submit_task", methods=["POST"])
 def submit_task():
     TASK_QUEUE.put(request.json)
@@ -438,5 +458,5 @@ if __name__ == "__main__":
     # Render assigns PORT environment variable for web services
     port = int(os.environ.get("PORT", 5000))
     debug_mode = os.environ.get("FLASK_ENV") != "production"
-    print(f"✅ Client Proxies Ready. Starting on port {port}")
+    print(f"[FRONTEND] ✅ Client Proxies Ready. Starting on port {port}")
     app.run(host="0.0.0.0", port=port, debug=debug_mode, use_reloader=False)

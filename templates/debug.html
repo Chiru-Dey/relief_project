@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database Debug - Disaster Relief System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }
+        h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.5rem;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 8px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        th {
+            background: #667eea;
+            color: white;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        tr:hover {
+            background: #f5f5f5;
+        }
+        .empty {
+            text-align: center;
+            color: #999;
+            padding: 20px;
+            font-style: italic;
+        }
+        .refresh-btn {
+            background: #10B981;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+            transition: all 0.3s;
+        }
+        .refresh-btn:hover {
+            background: #059669;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(16, 185, 129, 0.4);
+        }
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .status-PENDING { background: #FEF3C7; color: #92400E; }
+        .status-APPROVED { background: #D1FAE5; color: #065F46; }
+        .status-ACTION_REQUIRED { background: #FEE2E2; color: #991B1B; }
+        .status-PENDING_DISPATCH { background: #DBEAFE; color: #1E40AF; }
+        .status-ACTION_TAKEN { background: #E0E7FF; color: #3730A3; }
+        .timestamp {
+            font-size: 0.85rem;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Database Debug Panel</h1>
+        
+        <button class="refresh-btn" onclick="location.reload()">🔄 Refresh Data</button>
+        
+        <!-- Inventory -->
+        <div class="section">
+            <h2>📦 Inventory</h2>
+            {% if inventory %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Item Name</th>
+                        <th>Quantity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in inventory %}
+                    <tr>
+                        <td><strong>{{ item.item_name.replace('_', ' ').title() }}</strong></td>
+                        <td>{{ item.quantity }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="empty">No inventory items found</p>
+            {% endif %}
+        </div>
+        
+        <!-- Requests -->
+        <div class="section">
+            <h2>📋 Requests</h2>
+            {% if requests %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Item</th>
+                        <th>Qty</th>
+                        <th>Location</th>
+                        <th>Status</th>
+                        <th>Session ID</th>
+                        <th>Notes</th>
+                        <th>Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in requests %}
+                    <tr>
+                        <td><strong>{{ req.id }}</strong></td>
+                        <td>{{ req.item_name.replace('_', ' ').title() }}</td>
+                        <td>{{ req.quantity }}</td>
+                        <td>{{ req.location }}</td>
+                        <td><span class="status-badge status-{{ req.status }}">{{ req.status }}</span></td>
+                        <td class="timestamp">{{ req.session_id or 'N/A' }}</td>
+                        <td>{{ req.notes or '-' }}</td>
+                        <td class="timestamp">{{ req.timestamp }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="empty">No requests found</p>
+            {% endif %}
+        </div>
+        
+        <!-- Active Sessions -->
+        <div class="section">
+            <h2>🔐 Active Sessions</h2>
+            {% if sessions %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Session ID</th>
+                        <th>Location</th>
+                        <th>Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for session in sessions %}
+                    <tr>
+                        <td><code>{{ session.session_id }}</code></td>
+                        <td>{{ session.location }}</td>
+                        <td class="timestamp">{{ session.timestamp }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="empty">No active sessions found</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

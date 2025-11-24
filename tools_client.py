@@ -270,10 +270,10 @@ def request_relief(item_name: str, quantity: int, location: str, is_critical: bo
     # Update this session with the actual location for future lookups
     if session_id:
         database.register_active_session(session_id, location)
-        print(f"🔍 DEBUG: Updated session {session_id} with location: {location}")
+        print(f"[BACKEND] 🔍 DEBUG: Updated session {session_id} with location: {location}")
     
     conn.close()
-    print(f"🔍 DEBUG: request_relief - location: {location}, session_id: {session_id}")
+    print(f"[BACKEND] 🔍 DEBUG: request_relief - location: {location}, session_id: {session_id}")
     
     # 1. Item doesn't exist
     if current_stock == -1: 
