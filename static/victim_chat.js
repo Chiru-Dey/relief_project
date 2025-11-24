@@ -61,7 +61,7 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (e) { console.error("History load failed", e); }
     }
     
-    // 🔥 POLL FOR NEW MESSAGES (from supervisor notifications)
+    // 🔥 POLL FOR NEW MESSAGES (from supervisor notifications and saved AI responses)
     async function pollForNewMessages() {
         try {
             const res = await fetch(`/api/victim_history/${sessionId}`);
@@ -71,7 +71,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 // New messages arrived - add only the new ones
                 const newMessages = data.history.slice(lastMessageCount);
                 newMessages.forEach(msg => {
-                    addBubble(msg.text, msg.sender === 'user' ? 'user' : 'ai');
+                    const msgKey = `history_${msg.sender}_${msg.text.substring(0, 50)}`;
+                    // Only display if not already shown by pollResults
+                    if (!displayedMessages.has(msgKey) && msg.sender !== 'user') {
+                        displayedMessages.add(msgKey);
+                        addBubble(msg.text, msg.sender === 'user' ? 'user' : 'ai');
+                    }
                 });
                 lastMessageCount = data.history.length;
             }
@@ -94,6 +99,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
     
+    const displayedMessages = new Set(); // Track messages we've already displayed locally
+    
     async function pollResults() {
         try {
             const res = await fetch(`/api/get_results/${CLIENT_ID}`);
@@ -102,8 +109,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 hideLoading();
                 data.results.forEach(result => {
                     if (result.persona === 'victim') {
-                        addBubble(result.output, 'ai');
-                        lastMessageCount++; // Increment to prevent duplicate from pollForNewMessages
+                        const msgKey = `result_${result.task_name}_${result.output.substring(0, 50)}`;
+                        if (!displayedMessages.has(msgKey)) {
+                            displayedMessages.add(msgKey);
+                            addBubble(result.output, 'ai');
+                        }
                     }
                 });
             }
