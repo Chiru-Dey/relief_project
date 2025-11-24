@@ -50,6 +50,10 @@
             </div>
         </div>
     </div>
+    <script>
+        // Pass server-generated session_id to JavaScript
+        const SERVER_SESSION_ID = "{{ session_id }}";
+    </script>
     <script src="{{ url_for('static', filename='victim_chat.js') }}"></script>
 </body>
 </html>

@@ -95,9 +95,10 @@ def supervisor_resolve_action_required(task_id: int, buffer_multiplier: float = 
         # Dispatch the requested amount
         database.update_stock(item_name, current_stock - quantity_needed)
         
-        # Send notification to victim
+        # Send notification to victim using session_id from the request
         import tools_client
-        session_id = database.get_session_for_location(location)
+        task = database.get_request_by_id(task_id)
+        session_id = task.get('session_id') if task else None
         if session_id:
             tools_client.send_victim_chat_message(
                 session_id,

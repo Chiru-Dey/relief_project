@@ -12,11 +12,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const CLIENT_ID = 'vic_' + Math.random().toString(36).substring(2, 9);
     
     // 🔥 SESSION PERSISTENCE LOGIC
-    let sessionId = sessionStorage.getItem("relief_session_id");
+    // Use server-provided session_id (from template) or fallback to client-generated
+    let sessionId = typeof SERVER_SESSION_ID !== 'undefined' && SERVER_SESSION_ID ? SERVER_SESSION_ID : sessionStorage.getItem("relief_session_id");
     if (!sessionId) {
         sessionId = 'session_' + Date.now();
-        sessionStorage.setItem("relief_session_id", sessionId);
     }
+    // Always store in sessionStorage for page reloads
+    sessionStorage.setItem("relief_session_id", sessionId);
 
     function autoResize() {
         textarea.style.height = 'auto';

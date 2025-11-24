@@ -7,6 +7,9 @@ from typing import Optional
 # Frontend server URL for logging supervisor activities
 FRONTEND_URL = "http://localhost:5000"
 
+# Global variable to store current session ID (set by agent runner)
+CURRENT_SESSION_ID = None
+
 # Thread-local storage for session context (backup method)
 _session_context = threading.local()
 
@@ -14,9 +17,15 @@ def set_session_context(session_id: str):
     """Set the current session ID for this thread"""
     _session_context.session_id = session_id
 
-def get_session_context() -> str:
-    """Get the current session ID for this thread"""
-    return getattr(_session_context, 'session_id', None)
+def get_session_context(location: str = None) -> str:
+    """Get the current session ID from database based on location"""
+    # Session is stored in database when request is created
+    # We look it up by location when we need to send notifications
+    if location:
+        session_id = database.get_session_for_location(location)
+        print(f"🔍 DEBUG (tools_client): get_session_context({location}) returned: {session_id}")
+        return session_id
+    return None
 
 def clear_session_context():
     """Clear the session context"""
@@ -248,12 +257,20 @@ def request_relief(item_name: str, quantity: int, location: str, is_critical: bo
     normalized_name = normalize_item_name(item_name)
     current_stock = database.get_item_stock(normalized_name)
     
-    # Try to get session ID from context (frontend) or database lookup (backend)
-    session_id = get_session_context() or database.get_session_for_location(location)
+    # Get session ID from database - look for the most recent CURRENT session
+    import sqlite3
+    conn = sqlite3.connect('relief_logistics.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT session_id FROM active_sessions WHERE location = "CURRENT" ORDER BY timestamp DESC LIMIT 1')
+    row = cursor.fetchone()
+    session_id = row[0] if row else None
     
-    # Register this session with the location in database for future lookups
+    # Update this session with the actual location now that we know it
     if session_id:
         database.register_active_session(session_id, location)
+    
+    conn.close()
+    print(f"🔍 DEBUG: request_relief - location: {location}, session_id: {session_id}")
     
     # 1. Item doesn't exist
     if current_stock == -1: 

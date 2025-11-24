@@ -103,8 +103,12 @@ def agent_worker():
         runner = SUPERVISOR_RUNNER if job["persona"] == "supervisor" else VICTIM_RUNNER
         session_id = job.get("session_id", "default_session")
         
+        # Store session_id in the message metadata for backend to extract
+        # Since frontend and backend are separate processes, we can't use global variables
+        
         user_message = None
         if "text" in job and job["text"]:
+            # Session is stored in database, no need to pass in message
             user_message = types.Content(role="user", parts=[types.Part(text=job["text"])])
         elif "audio" in job and job["audio"]:
             try:
@@ -169,26 +173,19 @@ def agent_worker():
             CHAT_STORE[sess_id].append({"sender": "user", "text": msg_text_clean})
             user_msg_added = True
             
-            # Set session context for tools to use
-            import tools_client
-            tools_client.set_session_context(sess_id)
+            # Session is now stored in database via register_active_session
+            # Tools will look it up from database when needed
             
-            # PRE-REGISTER session with potential locations mentioned in message
-            # This allows backend to find session even before tool executes
-            import database
-            import re
-            # Extract location mentions (simple heuristic)
-            locations = re.findall(r'\b(at|in|to)\s+(\w+)', msg_text.lower())
-            for _, location in locations:
-                database.register_active_session(sess_id, location.title())
+            # Session ID is now stored directly in requests when created
+            # No need for location-based session mapping anymore
 
         client_id = job["client_id"]
+        
+        # Session is stored in database and in the job itself
+        
         res = loop.run_until_complete(run_task(job))
         
-        # Clear session context after task completion
-        if job["persona"] == "victim":
-            import tools_client
-            tools_client.clear_session_context()
+        # Session stored in database, no cleanup needed
 
         # Only save and send to frontend if we have a valid response
         if res is not None:
@@ -214,7 +211,15 @@ def agent_worker():
 
 # --- ROUTES ---
 @app.route("/")
-def victim_chat(): return render_template("victim_chat.html")
+def victim_chat():
+    import uuid
+    import database
+    # Generate session_id and store as "current active session" in database
+    session_id = f"session_{uuid.uuid4().hex[:12]}"
+    # Store with special marker "CURRENT" so backend can retrieve the most recent session
+    database.register_active_session(session_id, location="CURRENT")
+    print(f"🔍 DEBUG: Created new session: {session_id}")
+    return render_template("victim_chat.html", session_id=session_id)
 @app.route("/supervisor")
 def supervisor_dashboard(): return render_template("supervisor_dashboard.html")
 
