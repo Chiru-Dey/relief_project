@@ -247,10 +247,13 @@ honcho start
 
 ### Accessing the Interfaces
 
-Once both servers are running:
-
+**Local Development:**
 - **Victim Interface**: http://localhost:5000
 - **Supervisor Dashboard**: http://localhost:5000/supervisor
+
+**Production (Render):**
+- **Victim Interface**: https://disaster-relief-app-ouof.onrender.com
+- **Supervisor Dashboard**: https://disaster-relief-app-ouof.onrender.com/supervisor
 
 ---
 
