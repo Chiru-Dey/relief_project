@@ -67,19 +67,30 @@ item_finder_agent = Agent(
 
 Valid database items: [{VALID_ITEMS_STR}]
 
-Rules:
+CRITICAL Rules:
 1. Match user input (case-insensitive, ignore spaces/hyphens/underscores)
-2. 'water bottles' → 'water_bottles'
-3. 'first aid kits' → 'first-aid kits'
-4. 'Food Packs' → 'food_packs'
-5. Handle typos: 'bootle' → 'water_bottles'
-6. Return ONLY the exact database key or 'None'
+2. Handle singular/plural forms intelligently:
+   - If user says singular form (e.g., "tent"), check if plural exists in database (e.g., "tents")
+   - If user says plural form (e.g., "batteries"), check if it matches database
+   - Database items might be singular OR plural - match to whichever exists
+   - Example: "tent" should match "tents" if that's what's in database
+   - Example: "battery" should match "batteries" if that's what's in database
+3. Handle typos using fuzzy/phonetic matching
+4. Normalize spaces/underscores: "water bottle" = "water_bottle" = "water bottles" = "water_bottles"
+5. Return ONLY the exact database key that matches, or 'None' if no match found
+
+Matching Strategy:
+- Try exact match first
+- Try singular ↔ plural conversion (add/remove 's', 'es', 'ies')
+- Try fuzzy matching for typos
+- Check all database items for closest match
 
 Examples:
-- User: "water bottles" → You: "water_bottles"
-- User: "BATTERIES" → You: "batteries"
-- User: "first aid kit" → You: "first-aid kits"
-- User: "invalid item" → You: "None"
+- User: "tent" → Database has "tents" → You: "tents"
+- User: "water bottle" → Database has "water_bottles" → You: "water_bottles"  
+- User: "battery" → Database has "batteries" → You: "batteries"
+- User: "blanket" → Database has "blankets" → You: "blankets"
+- User: "helicopters" → Not in database → You: "None"
 """
 )
 
@@ -103,18 +114,20 @@ Step-by-step process:
 4. For each item: Call `item_finder_agent` to normalize item name
    - If item_finder returns 'None' → Item is NOT available in inventory
      • MANDATORY: You MUST call `escalation_agent` to log this to supervisor using log_new_item_request(item_name, quantity, location)
-     • Then tell user politely that item is unavailable and list available items
+     • Then tell user politely that item is unavailable
+     • CRITICAL: When listing available items, you MUST use this EXACT list: {VALID_ITEMS_STR}
+     • DO NOT make up your own list - use the one provided above
    - If item_finder returns valid name → proceed to step 5
 5. For valid items only: Call `request_dispatcher_agent` with (normalized_name, quantity, location)
 6. Summarize results naturally with empathy
 
 Example - INVALID ITEM:
 - User: "I need 10 helicopters"
-- You: "I'm sorry, helicopters are not available in our relief supplies. We have: water_bottles, food_packs, medical_kits, blankets, and batteries. Can I help you with any of these?"
+- You: "I'm sorry, helicopters are not available in our relief supplies. We have: {VALID_ITEMS_STR}. Can I help you with any of these?"
 
 Example - MIXED VALID/INVALID:
 - User: "I need 5 blankets and 3 rockets"
-- You: Process blankets normally, then: "I dispatched 5 blankets. However, rockets are not available. We only have: water_bottles, food_packs, medical_kits, blankets, and batteries."
+- You: Process blankets normally, then: "I dispatched 5 blankets. However, rockets are not available. We only have: {VALID_ITEMS_STR}."
 
 Example of CORRECT behavior:
 - User: "need 20 water bottles, 5 tents"
