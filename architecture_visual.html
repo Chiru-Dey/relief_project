@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Disaster Relief System Architecture</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 40px;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.2em;
+            color: #666;
+        }
+        
+        .layer {
+            margin-bottom: 40px;
+            position: relative;
+        }
+        
+        .layer-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #764ba2;
+            margin-bottom: 20px;
+            padding-left: 15px;
+            border-left: 5px solid #667eea;
+        }
+        
+        .components {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .component {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 15px;
+            flex: 1;
+            min-width: 280px;
+            max-width: 400px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .component:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.5);
+        }
+        
+        .component h3 {
+            font-size: 1.4em;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .icon {
+            font-size: 1.8em;
+        }
+        
+        .component ul {
+            list-style: none;
+            margin-top: 15px;
+        }
+        
+        .component li {
+            padding: 8px 0;
+            padding-left: 20px;
+            position: relative;
+            font-size: 0.95em;
+        }
+        
+        .component li:before {
+            content: "▸";
+            position: absolute;
+            left: 0;
+            color: #ffd700;
+        }
+        
+        .agent-box {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 10px 0;
+            border-left: 3px solid #ffd700;
+        }
+        
+        .agent-box h4 {
+            font-size: 1.1em;
+            margin-bottom: 8px;
+            color: #ffd700;
+        }
+        
+        .agent-box ul {
+            margin-top: 8px;
+        }
+        
+        .arrow {
+            text-align: center;
+            font-size: 3em;
+            color: #667eea;
+            margin: 20px 0;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .database {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            padding: 30px;
+            border-radius: 15px;
+            color: white;
+            margin-top: 20px;
+        }
+        
+        .database h3 {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .db-tables {
+            display: flex;
+            gap: 20px;
+            justify-content: space-around;
+            flex-wrap: wrap;
+        }
+        
+        .table {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .table h4 {
+            font-size: 1.2em;
+            margin-bottom: 10px;
+            color: #ffd700;
+        }
+        
+        .flow-example {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 15px;
+            margin-top: 40px;
+            border: 3px solid #667eea;
+        }
+        
+        .flow-example h3 {
+            color: #667eea;
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .flow-step {
+            display: flex;
+            align-items: center;
+            margin: 15px 0;
+            padding: 15px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .flow-step .step-number {
+            background: #667eea;
+            color: white;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+        
+        .flow-step .step-text {
+            flex: 1;
+            color: #333;
+        }
+        
+        .tech-stack {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 40px;
+        }
+        
+        .tech-item {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        
+        .tech-item h4 {
+            font-size: 1.2em;
+            margin-bottom: 5px;
+        }
+        
+        .tech-item p {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        .key-features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        
+        .feature {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .feature h4 {
+            color: #667eea;
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+        
+        .feature p {
+            color: #666;
+            font-size: 0.95em;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🆘 Disaster Relief Management System</h1>
+            <p>Hierarchical Multi-Agent Architecture powered by Google Gemini AI</p>
+        </div>
+        
+        <!-- USER LAYER -->
+        <div class="layer">
+            <div class="layer-title">👥 USER INTERFACES (Port 5000)</div>
+            <div class="components">
+                <div class="component">
+                    <h3><span class="icon">🆘</span> Victim Chat Interface</h3>
+                    <ul>
+                        <li>Natural language request input</li>
+                        <li>Real-time status updates</li>
+                        <li>Session-based conversations</li>
+                        <li>Context-aware responses</li>
+                        <li>24/7 availability</li>
+                    </ul>
+                </div>
+                <div class="component">
+                    <h3><span class="icon">📊</span> Supervisor Dashboard</h3>
+                    <ul>
+                        <li>Real-time inventory monitoring</li>
+                        <li>Pending request approvals</li>
+                        <li>Low stock alerts</li>
+                        <li>Action item management</li>
+                        <li>Complete audit trail</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="arrow">⬇</div>
+        
+        <!-- WEB LAYER -->
+        <div class="layer">
+            <div class="layer-title">🌐 FLASK FRONTEND SERVER</div>
+            <div class="components">
+                <div class="component">
+                    <h3><span class="icon">⚡</span> Web Application Layer</h3>
+                    <ul>
+                        <li>Route: /victim (Chat Interface)</li>
+                        <li>Route: /supervisor (Dashboard)</li>
+                        <li>Flask-Session management</li>
+                        <li>A2A Protocol communication</li>
+                        <li>Jinja2 template rendering</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="arrow">⬇</div>
+        
+        <!-- BACKEND LAYER -->
+        <div class="layer">
+            <div class="layer-title">⚡ FASTAPI BACKEND SERVER (Port 8001)</div>
+            <div class="components">
+                <div class="component" style="max-width: 100%;">
+                    <h3><span class="icon">🧠</span> Manager Orchestrator (Top-Level Brain)</h3>
+                    <p style="margin: 10px 0; opacity: 0.95;">Powered by <strong>Gemini 2.5 Flash</strong> - Intelligently routes all requests</p>
+                    <ul>
+                        <li>Analyzes user type and intent</li>
+                        <li>Routes "victim" requests → Victim Orchestrator</li>
+                        <li>Routes "supervisor" requests → Supervisor Orchestrator</li>
+                        <li>A2A protocol implementation</li>
+                        <li>Error handling and logging</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="arrow">⬇</div>
+        
+        <!-- ORCHESTRATORS LAYER -->
+        <div class="layer">
+            <div class="layer-title">🎯 SPECIALIZED ORCHESTRATORS</div>
+            <div class="components">
+                <!-- VICTIM ORCHESTRATOR -->
+                <div class="component">
+                    <h3><span class="icon">🆘</span> Victim Orchestrator</h3>
+                    <p style="margin: 10px 0; opacity: 0.95;">Manages victim requests through 4 specialized agents</p>
+                    
+                    <div class="agent-box">
+                        <h4>1️⃣ Strategist Agent</h4>
+                        <ul>
+                            <li>Extracts item names</li>
+                            <li>Identifies quantities</li>
+                            <li>Determines locations</li>
+                            <li>Understands intent & context</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="agent-box">
+                        <h4>2️⃣ Item Finder Agent</h4>
+                        <ul>
+                            <li>Fuzzy matching (60% threshold)</li>
+                            <li>Handles typos gracefully</li>
+                            <li>Suggests alternatives</li>
+                            <li>Checks availability</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="agent-box">
+                        <h4>3️⃣ Request Dispatcher</h4>
+                        <ul>
+                            <li>Creates requests in DB</li>
+                            <li>Auto-approves (<50 items)</li>
+                            <li>Escalates large orders (≥50)</li>
+                            <li>Deducts inventory automatically</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="agent-box">
+                        <h4>4️⃣ Escalation Agent</h4>
+                        <ul>
+                            <li>Flags critical issues</li>
+                            <li>Notifies supervisors</li>
+                            <li>Creates action items</li>
+                            <li>Tracks escalations</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <!-- SUPERVISOR ORCHESTRATOR -->
+                <div class="component">
+                    <h3><span class="icon">📋</span> Supervisor Orchestrator</h3>
+                    <p style="margin: 10px 0; opacity: 0.95;">Manages operations through 3 specialized agents</p>
+                    
+                    <div class="agent-box">
+                        <h4>1️⃣ Inventory Manager</h4>
+                        <ul>
+                            <li>Views all inventory</li>
+                            <li>Checks stock levels</li>
+                            <li>Restocks items</li>
+                            <li>Updates quantities</li>
+                            <li>Monitors thresholds</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="agent-box">
+                        <h4>2️⃣ Approval Agent</h4>
+                        <ul>
+                            <li>Views pending requests</li>
+                            <li>Approves/denies requests</li>
+                            <li>Views request history</li>
+                            <li>Logs approver details</li>
+                            <li>Maintains audit trail</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="agent-box">
+                        <h4>3️⃣ Action Strategist</h4>
+                        <ul>
+                            <li>Analyzes critical shortages</li>
+                            <li>Resolves with buffer stock</li>
+                            <li>Contacts suppliers</li>
+                            <li>Updates affected victims</li>
+                            <li>Strategic decision-making</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="arrow">⬇</div>
+        
+        <!-- DATABASE LAYER -->
+        <div class="layer">
+            <div class="layer-title">💾 DATA PERSISTENCE LAYER</div>
+            <div class="database">
+                <h3>SQLite Database (disaster_relief.db)</h3>
+                <div class="db-tables">
+                    <div class="table">
+                        <h4>📦 INVENTORY</h4>
+                        <ul>
+                            <li>id, name, category</li>
+                            <li>quantity, unit</li>
+                            <li>threshold, buffer_stock</li>
+                            <li>Real-time sync</li>
+                        </ul>
+                    </div>
+                    <div class="table">
+                        <h4>📝 REQUESTS</h4>
+                        <ul>
+                            <li>id, victim_name</li>
+                            <li>item_names, quantities</li>
+                            <li>location, status, priority</li>
+                            <li>created_at, approved_at</li>
+                        </ul>
+                    </div>
+                    <div class="table">
+                        <h4>🚨 ACTION_ITEMS</h4>
+                        <ul>
+                            <li>id, issue, severity</li>
+                            <li>status (open/resolved)</li>
+                            <li>created_at, resolved_at</li>
+                            <li>Escalation tracking</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+    </div>
+</body>
+</html>
