@@ -293,6 +293,290 @@ honcho start
    - Filter by type (success, error, system)
 
 
+## 🚢 Deployment
+
+### Deploy to Render
+
+This application is configured for easy deployment to [Render](https://render.com) using the included `render.yaml` Blueprint file.
+
+#### Prerequisites
+
+1. A [Render account](https://dashboard.render.com/register) (free tier available)
+2. A GitHub/GitLab/Bitbucket repository with your code
+3. A Google API key for Gemini AI
+
+#### Quick Deploy
+
+**Option 1: Deploy via Dashboard**
+
+1. **Push your code** to GitHub/GitLab/Bitbucket
+2. **Sign in** to [Render Dashboard](https://dashboard.render.com)
+3. **Click "New +"** and select **"Blueprint"**
+4. **Connect your repository** and grant Render access
+5. **Set environment variables**:
+   - `GOOGLE_API_KEY`: Your Google Gemini API key
+6. **Click "Apply"** - Render will automatically:
+   - Read your `render.yaml` configuration
+   - Install dependencies from `requirements.txt`
+   - Start both backend and frontend servers using `honcho start`
+   - Assign you a public URL (e.g., `https://your-app.onrender.com`)
+
+**Option 2: Deploy Button**
+
+Add this button to deploy with one click:
+
+```markdown
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+```
+
+#### Configuration Files
+
+The deployment uses three key files:
+
+**1. `render.yaml` (Blueprint Configuration)**
+```yaml
+services:
+  - type: web
+    name: disaster-relief-app
+    runtime: python
+    plan: free  # or starter/standard/pro
+    buildCommand: pip install -r requirements.txt
+    startCommand: honcho start
+    envVars:
+      - key: GOOGLE_API_KEY
+        sync: false  # Must be set manually for security
+      - key: PYTHON_VERSION
+        value: "3.13.5"
+    healthCheckPath: /
+```
+
+**2. `Procfile` (Process Configuration)**
+```
+backend: python manager_server.py
+frontend: python frontend_app.py
+```
+
+**3. `requirements.txt` (Dependencies)**
+- All Python dependencies are automatically installed during build
+
+#### Environment Variables
+
+Set these in the Render Dashboard under your service's **Environment** tab:
+
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `GOOGLE_API_KEY` | ✅ Yes | Your Google Gemini API key | `AIza...` |
+| `PYTHON_VERSION` | No | Python version to use | `3.13.5` |
+| `PORT` | No | Auto-set by Render | `10000` |
+
+**Setting Environment Variables:**
+1. Navigate to your service in the Render Dashboard
+2. Go to **Environment** tab
+3. Click **Add Environment Variable**
+4. Enter key-value pairs
+5. Click **Save Changes**
+
+#### Post-Deployment
+
+After deployment succeeds:
+
+1. **Access your application**:
+   - Victim Interface: `https://your-app.onrender.com/`
+   - Supervisor Dashboard: `https://your-app.onrender.com/supervisor`
+
+2. **Monitor your service**:
+   - View logs in the **Logs** tab
+   - Check metrics in the **Metrics** tab
+   - Set up notifications in **Settings**
+
+3. **Custom Domain** (Optional):
+   - Go to **Settings** → **Custom Domains**
+   - Add your domain (e.g., `relief.yourdomain.com`)
+   - Configure DNS as instructed
+
+#### Free Tier Limitations
+
+If using Render's free tier, be aware:
+
+- ⏱️ **Services spin down after 15 minutes of inactivity**
+- 🐌 **First request after spindown takes ~50s** (cold start)
+- 💾 **750 hours/month free** (sufficient for testing)
+- 🔄 **Automatic redeployment** on every push to main branch
+
+**Tip**: Upgrade to Starter plan ($7/month) for:
+- Always-on services (no cold starts)
+- Faster deploys
+- More resources
+
+#### Troubleshooting Deployment
+
+**Build Failures:**
+```bash
+# Check logs in Render Dashboard → Logs tab
+# Common issues:
+- Missing GOOGLE_API_KEY → Add in Environment tab
+- Python version mismatch → Verify PYTHON_VERSION env var
+- Dependency conflicts → Check requirements.txt
+```
+
+**Runtime Errors:**
+```bash
+# View live logs:
+1. Go to Render Dashboard
+2. Select your service
+3. Click "Logs" tab
+4. Check for errors in startup
+
+# Common fixes:
+- Port binding: App binds to 0.0.0.0:10000 automatically
+- Database: SQLite creates disaster_relief.db on first run
+- API Key: Verify GOOGLE_API_KEY is set correctly
+```
+
+**Service Not Responding:**
+```bash
+# Health check configuration
+healthCheckPath: /
+# Ensure your app responds with 200 OK at root path
+```
+
+#### Advanced Configuration
+
+**Scaling:**
+```yaml
+# In render.yaml, add:
+services:
+  - type: web
+    # ...
+    numInstances: 2  # Run multiple instances
+    scaling:
+      minInstances: 1
+      maxInstances: 5
+      targetMemoryPercent: 80
+      targetCPUPercent: 80
+```
+
+**Persistent Storage:**
+```yaml
+# For SQLite persistence (not needed for free tier)
+services:
+  - type: web
+    # ...
+    disk:
+      name: disaster-relief-data
+      mountPath: /data
+      sizeGB: 1
+```
+
+**Preview Environments:**
+Enable automatic deployments for pull requests:
+```yaml
+# In render.yaml:
+previewsEnabled: true
+previewsExpireAfterDays: 7
+```
+
+#### Monitoring & Maintenance
+
+**View Logs:**
+```bash
+# Install Render CLI (optional)
+npm install -g @render.com/cli
+render login
+render logs -s disaster-relief-app -f
+```
+
+**Manual Redeploy:**
+1. Go to Render Dashboard
+2. Select your service
+3. Click **Manual Deploy** → **Deploy latest commit**
+
+**Rollback:**
+1. Go to **Events** tab
+2. Find a previous successful deploy
+3. Click **Rollback to this version**
+
+#### Production Best Practices
+
+1. **Use Secrets for API Keys**:
+   - Never commit `.env` files to Git
+   - Use Render's environment variables
+   - Enable "sync: false" for sensitive values
+
+2. **Enable Health Checks**:
+   - Configured automatically via `healthCheckPath: /`
+   - Render pings every 30 seconds
+   - Auto-restarts on failure
+
+3. **Set Up Notifications**:
+   - Dashboard → Settings → Notifications
+   - Add email/Slack for deploy events
+   - Get alerted on failures
+
+4. **Monitor Performance**:
+   - Check Metrics tab for CPU/Memory usage
+   - Review response times
+   - Set up alerts for anomalies
+
+5. **Database Backups**:
+   - SQLite file persists with disk storage
+   - Consider migrating to PostgreSQL for production
+   - Use Render's PostgreSQL service for managed backups
+
+#### Migrating to PostgreSQL (Production)
+
+For production deployments, consider using PostgreSQL:
+
+```yaml
+# Add to render.yaml
+databases:
+  - name: disaster-relief-db
+    plan: starter  # or free
+    databaseName: disaster_relief
+    user: disaster_relief_user
+
+services:
+  - type: web
+    # ...
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: disaster-relief-db
+          property: connectionString
+```
+
+Then update `database.py` to use PostgreSQL connection string.
+
+#### Alternative Deployment Options
+
+**Other Platforms:**
+- **Heroku**: Use same Procfile, add `runtime.txt`
+- **Railway**: Supports render.yaml or auto-detection
+- **Google Cloud Run**: Containerize with Docker
+- **AWS Elastic Beanstalk**: Use Procfile configuration
+- **Azure App Service**: Deploy via GitHub Actions
+
+**Docker Deployment:**
+```dockerfile
+# Dockerfile (create if needed)
+FROM python:3.13.5-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 10000
+CMD ["honcho", "start"]
+```
+
+#### Support & Resources
+
+- 📚 [Render Documentation](https://render.com/docs)
+- 🔧 [Blueprint YAML Reference](https://render.com/docs/blueprint-spec)
+- 💬 [Render Community Forum](https://community.render.com)
+- 📧 [Render Support](https://render.com/support)
+
+---
+
 ## 📚 API Documentation
 
 ### REST Endpoints
